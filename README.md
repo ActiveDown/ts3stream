@@ -21,6 +21,7 @@ Discord-style screen and application streaming inside **stock TeamSpeak 3** on W
   1. client context menu → `TS3Stream` → **Watch stream**;
   2. red **Watch stream** button in the client info panel;
   3. click the **LIVE** badge → confirmation popup.
+- Starting a stream does **not** open the viewer. To watch your own stream, use one of the three explicit actions; viewing does not stop publishing.
 - A plain click on a client row only selects the client; it never starts playback.
 - In-client viewer panel on the right, fullscreen on the same monitor as the TS3 window (F11 / button, Esc to exit).
 - Semi-transparent fullscreen members bar: channel members and talking indicators, with large **Hide** / **Exit** buttons.

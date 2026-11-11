@@ -90,12 +90,12 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
         "QLabel#ts3stream_members_title { color: #cfcfcf; font-size: 11px; font-weight: 600; }"
         "QToolButton { color: #d0d0d0; border: none; padding: 2px 6px; }"
         "QToolButton:hover { background: #333333; border-radius: 3px; }"
-        "QToolButton#ts3stream_members_btn { color: #ffffff; background: rgba(255, 255, 255, 38);"
-        "  border: 1px solid rgba(255, 255, 255, 90); border-radius: 5px;"
+        "QToolButton#ts3stream_members_btn { color: #f2f2f2; background: rgba(255, 255, 255, 22);"
+        "  border: 1px solid rgba(255, 255, 255, 55); border-radius: 5px;"
         "  padding: 3px 10px; font-size: 12px; font-weight: 600; }"
-        "QToolButton#ts3stream_members_btn:hover { background: rgba(255, 255, 255, 70); }"
-        "QWidget#ts3stream_members { background: rgba(18, 18, 18, 210);"
-        "  border-top: 2px solid rgba(255, 255, 255, 45); }"
+        "QToolButton#ts3stream_members_btn:hover { background: rgba(255, 255, 255, 45); }"
+        "QWidget#ts3stream_members { background: rgba(18, 18, 18, 150);"
+        "  border-top: 2px solid rgba(255, 255, 255, 32); }"
     ));
 
     auto* root = new QVBoxLayout(this);

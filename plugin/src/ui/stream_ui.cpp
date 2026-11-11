@@ -803,6 +803,7 @@ void StreamUi::shutdown() {
     }
 
     stopCapture(true);
+    stopViewer(true);
 
     if (fullscreen_ && panel_) {
         panel_->setParent(infoWrapper_);
@@ -890,9 +891,16 @@ void StreamUi::updateStreamButtonState() {
         stopAction_->setEnabled(publishing_);
     }
 
-    if (connected_ && !connected && captureState_) {
-        diag::log("StreamUi: disconnected from server, stopping stream");
-        stopCapture(false);
+    if (connected_ && !connected) {
+        if (captureState_) {
+            diag::log("StreamUi: disconnected from server, stopping stream");
+            stopCapture(false);
+        }
+        if (viewerState_) {
+            diag::log("StreamUi: disconnected from server, closing viewer");
+            stopViewer(false);
+            restoreInfoPanel();
+        }
     }
     if (connected != connected_) {
         diag::log("StreamUi: connection state changed connected=%d", connected ? 1 : 0);
@@ -901,7 +909,7 @@ void StreamUi::updateStreamButtonState() {
 }
 
 void StreamUi::startViewer() {
-    stopCapture();
+    stopViewer();
     ensurePanel();
     if (!panel_) {
         return;
@@ -926,7 +934,7 @@ void StreamUi::startViewer() {
 
     auto state = std::make_shared<CaptureState>();
     state->panel = panel_;
-    captureState_ = state;
+    viewerState_ = state;
 
     auto engine = std::make_shared<media::LiveKitEngine>();
     auto renderer = std::make_shared<media::AudioRenderer>();
@@ -966,11 +974,11 @@ void StreamUi::startViewer() {
         diag::log("StreamUi: viewer connect failed: %s", error.c_str());
         panel_->setSubtitle(QStringLiteral("Ошибка подключения: ") + QString::fromStdString(error));
         state->alive.store(false);
-        captureState_.reset();
+        viewerState_.reset();
         return;
     }
 
-    livekit_ = engine;
+    viewerLivekit_ = engine;
     startPanelTimer();
     panel_->setTitle(QStringLiteral("Тестовый стрим"));
     panel_->setSubtitle(QStringLiteral("LiveKit viewer"));
@@ -992,7 +1000,7 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
         return;
     }
 
-    stopCapture();
+    stopViewer();
     ensurePanel();
     if (!panel_) {
         return;
@@ -1011,7 +1019,7 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
                                        .arg(myIdentity)
                                        .arg(QDateTime::currentMSecsSinceEpoch());
 
-    const int generation = ++captureGeneration_;
+    const int generation = ++viewerGeneration_;
     panel_->setTitle(QStringLiteral("Стрим: %1").arg(nickname));
     panel_->setSubtitle(QStringLiteral("Запрос токена…"));
     panel_->setLive(false);
@@ -1023,7 +1031,7 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
     control_->fetchToken(room, viewerIdentity, myNickname, false,
                          [this, generation, room, targetIdentity, nickname](
                              bool ok, const LiveKitToken& token, const QString& error) {
-        if (generation != captureGeneration_ || !initialized_) {
+        if (generation != viewerGeneration_ || !initialized_) {
             return;
         }
         if (!ok) {
@@ -1040,7 +1048,7 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
         auto state = std::make_shared<CaptureState>();
         state->panel = panel_;
         state->title = QStringLiteral("Стрим: %1").arg(nickname);
-        captureState_ = state;
+        viewerState_ = state;
 
         auto engine = std::make_shared<media::LiveKitEngine>();
         auto renderer = std::make_shared<media::AudioRenderer>();
@@ -1077,11 +1085,11 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
             diag::log("StreamUi: viewer connect failed: %s", connectError.c_str());
             panel_->setSubtitle(QStringLiteral("Ошибка подключения: ") + QString::fromStdString(connectError));
             state->alive.store(false);
-            captureState_.reset();
+            viewerState_.reset();
             return;
         }
 
-        livekit_ = engine;
+        viewerLivekit_ = engine;
         startPanelTimer();
         panel_->setTitle(QStringLiteral("Стрим: %1").arg(nickname));
         panel_->setSubtitle(QStringLiteral("канал %1 · LiveKit").arg(room));
@@ -1113,27 +1121,12 @@ void StreamUi::startCapture(const CaptureSource& source) {
     int channelId = 0;
     if (!roomContext(room, serverUid, channelId, identity, nickname)) {
         diag::log("StreamUi: cannot resolve TS3 channel room");
-        ensurePanel();
-        if (panel_) {
-            panel_->setSubtitle(QStringLiteral("Не удалось определить канал TS3"));
-        }
         return;
     }
 
     stopCapture();
-    ensurePanel();
-    if (!panel_) {
-        diag::log("StreamUi: no panel, cannot start capture");
-        return;
-    }
 
     const int generation = ++captureGeneration_;
-    panel_->setTitle(source.title);
-    panel_->setSubtitle(QStringLiteral("Получение токена…"));
-    panel_->setLive(false);
-    panel_->setStats(0, 0, 0);
-    panel_->setAudioStatus(QStringLiteral("подключение"));
-
     diag::log("StreamUi: requesting publish token room=%s identity=%s",
               room.toUtf8().constData(), identity.toUtf8().constData());
     control_->fetchToken(room, identity, nickname, true,
@@ -1144,10 +1137,6 @@ void StreamUi::startCapture(const CaptureSource& source) {
         }
         if (!ok) {
             diag::log("StreamUi: publish token failed: %s", error.toUtf8().constData());
-            if (panel_) {
-                panel_->setSubtitle(QStringLiteral("Control API: ") + error);
-                panel_->setAudioStatus(QStringLiteral("нет токена"));
-            }
             return;
         }
         beginCapture(source, token, room, identity, nickname, channelId, serverUid);
@@ -1158,14 +1147,9 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
                             const QString& room, const QString& identity, const QString& nickname,
                             int channelId, const QString& serverUid) {
     stopCapture();
-    ensurePanel();
-    if (!panel_) {
-        diag::log("StreamUi: no panel, cannot start capture");
-        return;
-    }
 
     auto state = std::make_shared<CaptureState>();
-    state->panel = panel_;
+    state->panel = nullptr;
     state->title = source.title;
     state->fps = source.fps > 0 ? source.fps : 30;
     state->autoFps = source.autoFps;
@@ -1174,24 +1158,10 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
     publishing_ = true;
     diag::log("StreamUi: capture fps=%d auto=%d", state->fps, state->autoFps ? 1 : 0);
 
-    panel_->setTitle(source.title);
-    panel_->setSubtitle(sourceSubtitle(source));
-    panel_->setLive(false);
-    panel_->setStats(0, 0, 0);
-    panel_->setAudioStatus(source.audioType == CaptureSource::AudioType::None
-                               ? QStringLiteral("выключен")
-                               : QStringLiteral("запуск…"));
-
-    startPanelTimer();
-
     std::shared_ptr<media::LiveKitEngine> livekitEngine;
     if (token.url.isEmpty() || token.token.isEmpty()) {
         diag::log("StreamUi: control API returned an empty token");
         stopCapture();
-        ensurePanel();
-        if (panel_) {
-            panel_->setSubtitle(sourceSubtitle(source) + QStringLiteral(" · нет токена"));
-        }
         return;
     } else {
         livekitEngine = std::make_shared<media::LiveKitEngine>();
@@ -1199,16 +1169,10 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
         if (livekitEngine->connect(token.url.toStdString(), token.token.toStdString(), false, error)) {
             livekit_ = livekitEngine;
             state->livekit = livekitEngine;
-            panel_->setSubtitle(sourceSubtitle(source) + QStringLiteral(" · LiveKit"));
             diag::log("StreamUi: LiveKit connected");
         } else {
             diag::log("StreamUi: LiveKit connect failed: %s", error.c_str());
             stopCapture();
-            ensurePanel();
-            if (panel_) {
-                panel_->setSubtitle(sourceSubtitle(source) + QStringLiteral(" · LiveKit: ошибка"));
-                panel_->setAudioStatus(QStringLiteral("нет соединения"));
-            }
             return;
         }
     }
@@ -1216,7 +1180,7 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
     if (source.audioType != CaptureSource::AudioType::None &&
         qEnvironmentVariableIsEmpty("TS3STREAM_DISABLE_AUDIO")) {
         auto audioState = std::make_shared<AudioState>();
-        audioState->panel = panel_;
+        audioState->panel = nullptr;
         audioState->sourceName = source.audioType == CaptureSource::AudioType::Process
                                      ? QStringLiteral("приложение")
                                      : QStringLiteral("система (без TeamSpeak)");
@@ -1281,14 +1245,12 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
 
         if (!audioOk) {
             diag::log("StreamUi: audio capture failed: %s", audioCapture_->lastError().c_str());
-            panel_->setAudioStatus(QStringLiteral("недоступно (TS3 исключён)"));
             audioCapture_.reset();
             audioState_.reset();
         } else {
             diag::log("StreamUi: audio capture started (TS3 excluded)");
             QTimer::singleShot(1500, this, [this] {
-                if (audioCapture_ && !audioCapture_->isRunning() && panel_) {
-                    panel_->setAudioStatus(QStringLiteral("недоступно (TS3 не захватывается)"));
+                if (audioCapture_ && !audioCapture_->isRunning()) {
                     diag::log("StreamUi: audio helper stopped: %s", audioCapture_->lastError().c_str());
                 }
             });
@@ -1298,10 +1260,6 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
     if (!qEnvironmentVariableIsEmpty("TS3STREAM_DISABLE_VIDEO")) {
         diag::log("StreamUi: video capture disabled by TS3STREAM_DISABLE_VIDEO");
         stopCapture();
-        ensurePanel();
-        if (panel_) {
-            panel_->setAudioStatus(QStringLiteral("видео отключено для теста"));
-        }
         return;
     }
 
@@ -1333,15 +1291,9 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
         const std::string captureError = capture_->lastError();
         diag::log("StreamUi: capture start failed: %s", captureError.c_str());
         stopCapture();
-        ensurePanel();
-        if (panel_) {
-            panel_->setSubtitle(QStringLiteral("Ошибка захвата: ") + QString::fromStdString(captureError));
-            panel_->setLive(false);
-        }
         return;
     }
 
-    panel_->setLive(true);
     if (control_) {
         activeRoom_ = room;
         activeIdentity_ = identity;
@@ -1371,7 +1323,7 @@ void StreamUi::startPanelTimer() {
         panelTimer_ = new QTimer(this);
         panelTimer_->setInterval(33);
         QObject::connect(panelTimer_, &QTimer::timeout, this, [this] {
-            auto state = captureState_;
+            auto state = viewerState_;
             if (!state || !state->alive.load() || !panel_) {
                 return;
             }
@@ -1491,9 +1443,6 @@ void StreamUi::stopCapture(bool forShutdown) {
     activeServerUid_.clear();
     activeChannelId_ = 0;
 
-    if (panelTimer_) {
-        panelTimer_->stop();
-    }
     if (captureState_) {
         captureState_->alive.store(false);
     }
@@ -1515,10 +1464,6 @@ void StreamUi::stopCapture(bool forShutdown) {
         frameProcessor_->stop();
         retiredFrameProcessors_.push_back(std::move(frameProcessor_));
     }
-    if (audioRenderer_) {
-        audioRenderer_->stop();
-        retiredAudioRenderers_.push_back(std::move(audioRenderer_));
-    }
     if (livekit_) {
         if (forShutdown) {
             livekit_->disconnectForShutdown();
@@ -1529,7 +1474,29 @@ void StreamUi::stopCapture(bool forShutdown) {
     }
     audioState_.reset();
     captureState_.reset();
+}
 
+void StreamUi::stopViewer(bool forShutdown) {
+    ++viewerGeneration_;
+    if (viewerState_) {
+        viewerState_->alive.store(false);
+    }
+    if (panelTimer_) {
+        panelTimer_->stop();
+    }
+    if (audioRenderer_) {
+        audioRenderer_->stop();
+        retiredAudioRenderers_.push_back(std::move(audioRenderer_));
+    }
+    if (viewerLivekit_) {
+        if (forShutdown) {
+            viewerLivekit_->disconnectForShutdown();
+        } else {
+            viewerLivekit_->disconnect();
+        }
+        viewerLivekit_.reset();
+    }
+    viewerState_.reset();
     if (panel_) {
         panel_->setLive(false);
         panel_->setStats(0, 0, 0);
@@ -1551,7 +1518,7 @@ void StreamUi::ensurePanel() {
     if (!panel_) {
         panel_ = new StreamPanel(infoWrapper_);
         panel_->setOnClose([this] {
-            stopCapture();
+            stopViewer();
             restoreInfoPanel();
         });
         panel_->setOnFullscreen([this] { toggleFullscreen(); });

@@ -75,6 +75,7 @@ private:
     void processVideoFrame(const std::shared_ptr<CaptureState>& state,
                            const media::CapturedVideoFrame& frame);
     void stopCapture(bool forShutdown = false);
+    void stopViewer(bool forShutdown = false);
     void ensurePanel();
     void restoreInfoPanel();
     void toggleFullscreen();
@@ -130,10 +131,12 @@ private:
     bool fullscreen_ = false;
     std::unique_ptr<media::WgcCapture> capture_;
     std::shared_ptr<CaptureState> captureState_;
+    std::shared_ptr<CaptureState> viewerState_;
     std::shared_ptr<FrameProcessor> frameProcessor_;
     std::unique_ptr<media::RemoteAudioCapture> audioCapture_;
     std::shared_ptr<AudioState> audioState_;
     std::shared_ptr<media::LiveKitEngine> livekit_;
+    std::shared_ptr<media::LiveKitEngine> viewerLivekit_;
     std::shared_ptr<media::AudioRenderer> audioRenderer_;
     QTimer* watchdog_ = nullptr;
     QTimer* panelTimer_ = nullptr;
@@ -149,6 +152,7 @@ private:
     QString activeServerUid_;
     int activeChannelId_ = 0;
     int captureGeneration_ = 0;
+    int viewerGeneration_ = 0;
     bool streamsRequestActive_ = false;
 
     QPointer<QTreeView> treeView_;
