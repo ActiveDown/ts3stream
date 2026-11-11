@@ -1,0 +1,20 @@
+[Unit]
+Description=LiveKit Server for TS3Stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=livekit
+Group=livekit
+ExecStart=/opt/ts3stream/bin/livekit-server --config /etc/ts3stream/livekit.yaml
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/ts3stream /var/log/ts3stream
+
+[Install]
+WantedBy=multi-user.target

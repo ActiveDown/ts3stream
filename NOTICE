@@ -1,0 +1,27 @@
+TS3Stream third-party notices
+=============================
+
+TeamSpeak 3 Plugin SDK
+----------------------
+The headers under plugin/third_party/ts3sdk/include are part of the TeamSpeak 3
+Plugin SDK and are Copyright (c) TeamSpeak Systems GmbH. They are used under the
+terms of the TeamSpeak 3 Plugin SDK. They are not covered by the MIT license of
+this repository.
+
+LiveKit
+-------
+The plugin links against the LiveKit C++ SDK and the release package contains
+livekit.dll / livekit_ffi.dll from the official LiveKit C++ SDK release.
+LiveKit is licensed under the Apache License 2.0:
+https://github.com/livekit/livekit/blob/master/LICENSE
+
+Qt
+--
+The plugin uses Qt 5.15.2 DLLs shipped with TeamSpeak 3. Qt is licensed under
+the GNU Lesser General Public License v3:
+https://www.qt.io/licensing/open-source-lgpl-obligations
+
+Windows Graphics Capture / WASAPI
+---------------------------------
+Used through the Windows SDK; no Microsoft binaries are redistributed by this
+project.

@@ -1,0 +1,32 @@
+# Build outputs
+build/
+dist/
+out/
+bin/
+obj/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.exe
+*.dll
+
+# Vendored/downloaded SDKs
+plugin/third_party/livekit/
+
+# Local config, logs and credentials
+*.log
+service.json
+control.env
+livekit.yaml
+*.bak
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+desktop.ini

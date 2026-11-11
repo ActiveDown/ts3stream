@@ -1,0 +1,20 @@
+[Unit]
+Description=TS3Stream control API
+After=network-online.target livekit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ts3stream
+Group=ts3stream
+EnvironmentFile=/etc/ts3stream/control.env
+ExecStart=/opt/ts3stream/bin/ts3stream-control
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/ts3stream
+
+[Install]
+WantedBy=multi-user.target

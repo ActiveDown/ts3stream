@@ -1,0 +1,19 @@
+stream.example.com {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8081
+    }
+
+    handle /rtc* {
+        reverse_proxy 127.0.0.1:7880
+    }
+
+    handle /twirp/* {
+        reverse_proxy 127.0.0.1:7880
+    }
+
+    handle {
+        respond "TS3Stream" 200
+    }
+}
