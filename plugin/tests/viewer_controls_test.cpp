@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QAction>
 #include <QMenu>
+#include <QLabel>
 #include <QSlider>
 #include <QTimer>
 #include <cstdio>
@@ -16,13 +17,19 @@ int main(int argc, char** argv) {
     };
     const int16_t samples[] = {-32768, -1234, -1, 0, 1, 1234, 32767};
     const int16_t half[] = {-16384, -617, 0, 0, 0, 617, 16383};
+    const int16_t boosted[] = {-32768, -1542, -1, 0, 1, 1542, 32767};
     for (int i = 0; i < 7; ++i) {
         check(ts3stream::media::applyPlaybackGain(samples[i], 0) == 0, "mute must output silence");
         check(ts3stream::media::applyPlaybackGain(samples[i], 50) == half[i], "50% PCM gain");
         check(ts3stream::media::applyPlaybackGain(samples[i], 100) == samples[i], "100% PCM unchanged");
         check(ts3stream::media::applyPlaybackGain(samples[i], -10) == 0, "lower clamp");
-        check(ts3stream::media::applyPlaybackGain(samples[i], 200) == samples[i], "upper clamp");
+        check(ts3stream::media::applyPlaybackGain(samples[i], 125) == boosted[i], "125% PCM gain and saturation");
+        check(ts3stream::media::applyPlaybackGain(samples[i], 200) == boosted[i], "upper clamp to 125%");
     }
+    check(ts3stream::media::applyPlaybackGain(26000, 125) == 32500, "positive gain below clipping");
+    check(ts3stream::media::applyPlaybackGain(-26000, 125) == -32500, "negative gain below clipping");
+    check(ts3stream::media::applyPlaybackGain(27000, 125) == 32767, "positive peak saturates");
+    check(ts3stream::media::applyPlaybackGain(-27000, 125) == -32768, "negative peak saturates");
     QWidget host;
     host.resize(900, 650);
     ts3stream::ui::StreamPanel panel(&host);
@@ -33,6 +40,8 @@ int main(int argc, char** argv) {
     auto* slider = panel.findChild<QSlider*>(QStringLiteral("ts3stream_volume"));
     auto* controls = panel.findChild<QWidget*>(QStringLiteral("ts3stream_playback_audio"));
     if (!mute || !slider || !controls) return 2;
+    check(slider->minimum() == 0 && slider->maximum() == 125 && slider->value() == 100,
+          "volume range is 0-125%, default remains 100%");
     int volume = -1, notifications = 0;
     bool muted = false;
     panel.setOnPlaybackAudioChanged([&](int v, bool m) { volume = v; muted = m; ++notifications; });
@@ -51,6 +60,24 @@ int main(int argc, char** argv) {
     panel.setFullscreenMode(false);
     check(controls->isVisible() && controls->parentWidget() != &panel && slider->value() == 37,
           "embedded controls restored without resetting level");
+    slider->setValue(125);
+    check(volume == 125 && !muted && notifications == 4, "boost reaches playback callback");
+    bool boostLabel = false;
+    for (auto* label : controls->findChildren<QLabel*>()) {
+        boostLabel = boostLabel || label->text() == QStringLiteral("125%");
+    }
+    check(boostLabel, "boost label displays 125%");
+    mute->click();
+    check(volume == 125 && muted && notifications == 5, "mute preserves boosted volume");
+    panel.setFullscreenMode(true);
+    mute->click();
+    check(volume == 125 && !muted && notifications == 6, "fullscreen unmute restores boost");
+    panel.setFullscreenMode(false);
+    check(slider->value() == 125, "boost survives fullscreen round trip");
+    panel.setPlaybackAudio(999, false);
+    check(slider->value() == 125 && notifications == 6, "programmatic upper clamp without feedback");
+    panel.setPlaybackAudio(-10, false);
+    check(slider->value() == 0 && notifications == 6, "programmatic lower clamp without feedback");
 
     for (int width : {80, 120, 180, 600}) {
         const QRect viewport(0, 0, width, 300);

@@ -228,7 +228,7 @@ sudo systemctl enable --now livekit
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.6/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.8/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -236,6 +236,8 @@ sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 
 ```bash
 TS3STREAM_CONTROL_ADDR=127.0.0.1:8081
+# Буфер видео и звука 2 с; зрителям нужен плагин 0.3.8+.
+TS3STREAM_PLAYOUT_DELAY_MS=2000
 TS3STREAM_CLIENT_KEY=PASTE_CLIENT_KEY
 LIVEKIT_API_KEY=ts3stream
 LIVEKIT_API_SECRET=PASTE_SECRET
@@ -353,7 +355,7 @@ sudo ufw enable
 
 ## 7. Установка и настройка Windows-клиента
 
-1. Установите `ts3stream-0.3.6.ts3_plugin` через TeamSpeak Package Installer.
+1. Установите `ts3stream-0.3.8.ts3_plugin` через TeamSpeak Package Installer.
 2. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно. Плагин читает маркер

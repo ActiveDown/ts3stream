@@ -31,24 +31,26 @@ type streamsResponse struct {
 }
 
 type config struct {
-	apiKey     string
-	apiSecret  string
-	livekitURL string
-	tokenTTL   time.Duration
-	publicURL  string
-	clientKey  string
-	query      ts3QueryConfig
+	apiKey         string
+	apiSecret      string
+	livekitURL     string
+	tokenTTL       time.Duration
+	publicURL      string
+	clientKey      string
+	query          ts3QueryConfig
+	playoutDelayMs int
 }
 
 type controlServer struct {
-	apiKey     string
-	apiSecret  string
-	livekitURL string
-	tokenTTL   time.Duration
-	publicURL  string
-	clientKey  string
-	query      ts3QueryConfig
-	registry   *streamRegistry
+	apiKey         string
+	apiSecret      string
+	livekitURL     string
+	tokenTTL       time.Duration
+	publicURL      string
+	clientKey      string
+	query          ts3QueryConfig
+	registry       *streamRegistry
+	playoutDelayMs int
 }
 
 type registerRequest struct {
@@ -111,14 +113,15 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func newControlServer(cfg config) *controlServer {
 	return &controlServer{
-		apiKey:     cfg.apiKey,
-		apiSecret:  cfg.apiSecret,
-		livekitURL: cfg.livekitURL,
-		tokenTTL:   cfg.tokenTTL,
-		publicURL:  cfg.publicURL,
-		clientKey:  cfg.clientKey,
-		query:      cfg.query,
-		registry:   newStreamRegistry(streamTTL),
+		apiKey:         cfg.apiKey,
+		apiSecret:      cfg.apiSecret,
+		livekitURL:     cfg.livekitURL,
+		tokenTTL:       cfg.tokenTTL,
+		publicURL:      cfg.publicURL,
+		clientKey:      cfg.clientKey,
+		query:          cfg.query,
+		registry:       newStreamRegistry(streamTTL),
+		playoutDelayMs: cfg.playoutDelayMs,
 	}
 }
 
@@ -225,6 +228,18 @@ func (s *controlServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		SetIdentity(identity).
 		SetName(name).
 		SetValidFor(s.tokenTTL)
+
+	// This config is applied only when LiveKit creates a new room. The client
+	// reads its ACTUAL metadata, so joining an older room cannot delay audio
+	// while video is still using the old unbuffered settings.
+	if s.playoutDelayMs > 0 {
+		accessToken.SetRoomConfig(&livekit.RoomConfiguration{
+			MinPlayoutDelay: uint32(s.playoutDelayMs),
+			MaxPlayoutDelay: uint32(s.playoutDelayMs),
+			SyncStreams:     true,
+			Metadata:        fmt.Sprintf("ts3stream-av-delay-v1:%d", s.playoutDelayMs),
+		})
+	}
 
 	token, err := accessToken.ToJWT()
 	if err != nil {
@@ -458,6 +473,10 @@ func main() {
 	ts3QuerySID := flag.String("ts3-query-sid", envOr("TS3_QUERY_SID", defaultTS3QuerySID), "TeamSpeak 3 virtual server ID for ServerQuery")
 	welcomeAuto := flag.Bool("welcome-auto", envBool("TS3STREAM_WELCOME_AUTO", false), "update the TS3 server welcome message with the public control URL on startup")
 	flag.Parse()
+	playoutDelayMs, err := strconv.Atoi(envOr("TS3STREAM_PLAYOUT_DELAY_MS", "0"))
+	if err != nil || playoutDelayMs < 0 || playoutDelayMs > 5000 || playoutDelayMs%10 != 0 {
+		log.Fatal("TS3STREAM_PLAYOUT_DELAY_MS must be 0..5000 in multiples of 10 milliseconds")
+	}
 
 	query := ts3QueryConfig{
 		addr:     strings.TrimSpace(*ts3QueryAddr),
@@ -467,13 +486,14 @@ func main() {
 	}
 
 	control := newControlServer(config{
-		apiKey:     *apiKey,
-		apiSecret:  *apiSecret,
-		livekitURL: *livekitURL,
-		tokenTTL:   *tokenTTL,
-		publicURL:  strings.TrimRight(strings.TrimSpace(*controlPublicURL), "/"),
-		clientKey:  *clientKey,
-		query:      query,
+		apiKey:         *apiKey,
+		apiSecret:      *apiSecret,
+		livekitURL:     *livekitURL,
+		tokenTTL:       *tokenTTL,
+		publicURL:      strings.TrimRight(strings.TrimSpace(*controlPublicURL), "/"),
+		clientKey:      *clientKey,
+		query:          query,
+		playoutDelayMs: playoutDelayMs,
 	})
 
 	server := &http.Server{

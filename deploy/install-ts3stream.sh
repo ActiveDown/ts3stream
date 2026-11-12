@@ -19,6 +19,9 @@ set -euo pipefail
 
 REPO="${TS3STREAM_REPO:-ActiveDown/ts3stream}"
 CONTROL_VERSION="${TS3STREAM_VERSION:-}"
+PLAYOUT_DELAY_MS="${TS3STREAM_PLAYOUT_DELAY_MS:-2000}"
+PLAYOUT_DELAY_SET=0
+[[ -n "${TS3STREAM_PLAYOUT_DELAY_MS:-}" ]] && PLAYOUT_DELAY_SET=1
 DOMAIN=""
 API_KEY="ts3stream"
 API_SECRET=""
@@ -41,6 +44,7 @@ Options:
   --api-secret SECRET    LiveKit API secret (default: generated)
   --client-key KEY       Shared key for the TS3 plugin (default: generated)
   --version TAG          Control API release tag, e.g. v0.2.1 (default: latest)
+  --playout-delay-ms MS   A/V buffer: 0..5000, steps of 10 (default: 2000; plugin 0.3.8+)
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
   --livekit-archive URL  Override the LiveKit Linux amd64 archive URL
@@ -76,6 +80,7 @@ parse_args() {
             --api-secret) API_SECRET="${2:-}"; shift 2 ;;
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
+            --playout-delay-ms) PLAYOUT_DELAY_MS="${2:-}"; PLAYOUT_DELAY_SET=1; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
             --no-firewall) CONFIGURE_FIREWALL=0; shift ;;
@@ -103,6 +108,16 @@ check_os() {
 }
 
 ask_settings() {
+    if [[ "$PLAYOUT_DELAY_SET" -eq 0 && -r /etc/ts3stream/control.env ]]; then
+        local previous_delay
+        previous_delay="$(grep '^TS3STREAM_PLAYOUT_DELAY_MS=' /etc/ts3stream/control.env | tail -n 1 || true)"
+        PLAYOUT_DELAY_MS="${previous_delay#*=}"
+        PLAYOUT_DELAY_MS="${PLAYOUT_DELAY_MS:-0}"
+    fi
+    [[ "$PLAYOUT_DELAY_MS" =~ ^[0-9]{1,4}$ ]] || die "invalid --playout-delay-ms"
+    PLAYOUT_DELAY_MS=$((10#$PLAYOUT_DELAY_MS))
+    (( PLAYOUT_DELAY_MS <= 5000 && PLAYOUT_DELAY_MS % 10 == 0 )) || die "playout delay must be 0..5000 in steps of 10 ms"
+    log "A/V buffer: ${PLAYOUT_DELAY_MS} ms (requires viewer plugin 0.3.8+)"
     DOMAIN="${DOMAIN#http://}"
     DOMAIN="${DOMAIN#https://}"
     DOMAIN="${DOMAIN%/}"
@@ -259,6 +274,7 @@ EOF
     cat > /etc/ts3stream/control.env <<EOF
 TS3STREAM_CONTROL_ADDR=${control_addr}
 TS3STREAM_CLIENT_KEY=${CLIENT_KEY}
+TS3STREAM_PLAYOUT_DELAY_MS=${PLAYOUT_DELAY_MS}
 LIVEKIT_API_KEY=${API_KEY}
 LIVEKIT_API_SECRET=${API_SECRET}
 LIVEKIT_URL=${livekit_url}
@@ -475,4 +491,4 @@ main() {
     print_result
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

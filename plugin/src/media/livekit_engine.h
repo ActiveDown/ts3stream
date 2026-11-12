@@ -34,6 +34,7 @@ public:
     void disconnectForShutdown();
 
     bool isConnected() const;
+    int playbackDelayMs() const;
 
     void setVideoFrameCallback(VideoFrameCallback callback);
     void setAudioFrameCallback(AudioFrameCallback callback);

@@ -9,6 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(wgc_test
     main.cpp
     ../../plugin/src/media/wgc_capture.cpp
+    ../../plugin/src/media/desktop_capture.cpp
+    ../../plugin/src/log.cpp
 )
 
 target_include_directories(wgc_test PRIVATE

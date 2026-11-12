@@ -1144,7 +1144,9 @@ void StreamUi::startViewer() {
     viewerLivekit_ = engine;
     startPanelTimer();
     panel_->setTitle(QStringLiteral("Тестовый стрим"));
-    panel_->setSubtitle(QStringLiteral("LiveKit viewer"));
+    panel_->setSubtitle(engine->playbackDelayMs() > 0
+        ? QStringLiteral("LiveKit · буфер A/V %1 с").arg(engine->playbackDelayMs() / 1000.0, 0, 'f', 1)
+        : QStringLiteral("LiveKit viewer"));
     panel_->setLive(true);
     panel_->setAudioStatus(QStringLiteral("подключён"));
     diag::log("StreamUi: viewer connected");
@@ -1279,7 +1281,9 @@ void StreamUi::startViewerForRoom(QString room, QString targetIdentity, QString 
         viewerLivekit_ = engine;
         startPanelTimer();
         panel_->setTitle(QStringLiteral("Стрим: %1").arg(nickname));
-        panel_->setSubtitle(QStringLiteral("канал %1 · LiveKit").arg(room));
+        panel_->setSubtitle(engine->playbackDelayMs() > 0
+            ? QStringLiteral("канал %1 · буфер A/V %2 с").arg(room).arg(engine->playbackDelayMs() / 1000.0, 0, 'f', 1)
+            : QStringLiteral("канал %1 · LiveKit").arg(room));
         panel_->setLive(true);
         panel_->setAudioStatus(QStringLiteral("подключён"));
         diag::log("StreamUi: viewer connected to %s, target=%s",
@@ -1465,7 +1469,7 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
             return;
         }
 
-        // WGC already limits the frame rate; keep this callback cheap and let
+        // The capture backend limits the frame rate; keep this callback cheap and let
         // the FrameProcessor thread do the QImage conversion and encoding.
         processor->push(std::move(frame));
     };

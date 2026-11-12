@@ -1,4 +1,5 @@
 ﻿#include "wgc_capture.h"
+#include "desktop_capture.h"
 
 #include "../log.h"
 
@@ -8,6 +9,7 @@
 #include <windows.graphics.directx.direct3d11.interop.h>
 
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <winrt/Windows.Graphics.DirectX.h>
@@ -51,12 +53,28 @@ T create_item_for(HWND window = nullptr, HMONITOR monitor = nullptr) {
     return item;
 }
 
+bool supportsCaptureBorderControl() {
+    try {
+        try {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        } catch (const winrt::hresult_error&) {
+            // TS3 may already have initialized this thread as STA.
+        }
+        return winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+            L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsBorderRequired");
+    } catch (const winrt::hresult_error&) {
+        return false;
+    }
+}
+
 } // namespace
 
 struct WgcCapture::Impl {
     std::atomic<bool> running{false};
     FrameCallback callback;
     std::string error;
+    std::unique_ptr<DesktopCapture> desktopCapture;
+    int targetFps = 30;
 
     winrt::com_ptr<ID3D11Device> d3dDevice;
     winrt::com_ptr<ID3D11DeviceContext> d3dContext;
@@ -335,6 +353,10 @@ struct WgcCapture::Impl {
     }
 
     void stop() {
+        if (desktopCapture) {
+            desktopCapture->stop();
+            desktopCapture.reset();
+        }
         running.store(false);
         try {
             if (framePool && frameToken.value != 0) {
@@ -376,6 +398,17 @@ bool WgcCapture::startMonitor(HMONITOR monitor, FrameCallback callback) {
         impl_->error = "startMonitor: null monitor";
         return false;
     }
+    // Released Windows 10 client builds lack IsBorderRequired. Silently
+    // ignoring that failure leaves the yellow monitor outline on the streamer.
+    // Select a genuinely borderless backend before creating any WGC session.
+    if (!supportsCaptureBorderControl()) {
+        impl_->stop();
+        impl_->error.clear();
+        impl_->desktopCapture = std::make_unique<DesktopCapture>();
+        impl_->desktopCapture->setTargetFps(impl_->targetFps);
+        diag::log("wgc border control unavailable; using DXGI for monitor capture");
+        return impl_->desktopCapture->startMonitor(monitor, std::move(callback));
+    }
     try {
         auto item = create_item_for<GraphicsCaptureItem>(nullptr, monitor);
         return impl_->start(std::move(item), std::move(callback));
@@ -404,16 +437,21 @@ void WgcCapture::stop() {
 }
 
 void WgcCapture::setTargetFps(int fps) {
+    impl_->targetFps = fps;
+    if (impl_->desktopCapture) impl_->desktopCapture->setTargetFps(fps);
     const int interval = fps > 0 ? 1000000 / fps : 0;
     impl_->frameIntervalUs.store(interval);
+    std::lock_guard<std::mutex> lock(impl_->frameMutex);
     impl_->lastAcceptedFrameUs = 0;
 }
 
 bool WgcCapture::isRunning() const {
+    if (impl_->desktopCapture) return impl_->desktopCapture->isRunning();
     return impl_->running.load();
 }
 
 std::string WgcCapture::lastError() const {
+    if (impl_->desktopCapture) return impl_->desktopCapture->lastError();
     return impl_->error;
 }
 

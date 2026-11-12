@@ -23,6 +23,7 @@ param(
     [string]$ApiSecret,
     [string]$ClientKey,
     [string]$Version,
+    [ValidateRange(0,5000)][int]$PlayoutDelayMs = 2000,
     [string]$InstallDir = 'C:\TS3Stream',
     [string]$Ts3Dir = 'C:\TS3Server',
     [string]$Ts3QueryPassword,
@@ -36,6 +37,19 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Repo = 'ActiveDown/ts3stream'
 $LogDir = Join-Path $InstallDir 'logs'
+
+# A reinstall must not silently enable buffering for older viewer plugins.
+if (-not $PSBoundParameters.ContainsKey('PlayoutDelayMs') -and
+    (Test-Path (Join-Path $InstallDir 'start-control.cmd'))) {
+    $previous = Get-Content (Join-Path $InstallDir 'start-control.cmd') -Raw
+    $PlayoutDelayMs = 0
+    if ($previous -match '(?m)^set "TS3STREAM_PLAYOUT_DELAY_MS=(\d+)"\s*$') {
+        $PlayoutDelayMs = [int]$Matches[1]
+    }
+}
+if ($PlayoutDelayMs -lt 0 -or $PlayoutDelayMs -gt 5000 -or $PlayoutDelayMs % 10 -ne 0) {
+    throw 'PlayoutDelayMs must be 0..5000 in steps of 10 milliseconds.'
+}
 
 function Write-Step([string]$Message) {
     Write-Host "[ts3stream] $Message" -ForegroundColor Cyan
@@ -80,6 +94,7 @@ if ([string]::IsNullOrWhiteSpace($ClientKey)) { $ClientKey = New-Secret 64 }
 
 Write-Step "Install directory: $InstallDir"
 Write-Step "TLS/Caddy: $(-not $NoTls)"
+Write-Step "A/V buffer: $PlayoutDelayMs ms (requires viewer plugin 0.3.8+)"
 if (-not $Yes) {
     Write-Host ''
     Write-Host 'Install plan:'
@@ -222,6 +237,7 @@ $startControl = @"
 cd /d "$InstallDir"
 set "TS3STREAM_CONTROL_ADDR=$controlAddr"
 set "TS3STREAM_CLIENT_KEY=$ClientKey"
+set "TS3STREAM_PLAYOUT_DELAY_MS=$PlayoutDelayMs"
 set "LIVEKIT_API_KEY=$ApiKey"
 set "LIVEKIT_API_SECRET=$ApiSecret"
 set "LIVEKIT_URL=$livekitUrl"

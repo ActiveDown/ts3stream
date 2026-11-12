@@ -19,6 +19,9 @@ set -euo pipefail
 
 REPO="${TS3STREAM_REPO:-ActiveDown/ts3stream}"
 CONTROL_VERSION="${TS3STREAM_VERSION:-}"
+PLAYOUT_DELAY_MS="${TS3STREAM_PLAYOUT_DELAY_MS:-2000}"
+PLAYOUT_DELAY_SET=0
+[[ -n "${TS3STREAM_PLAYOUT_DELAY_MS:-}" ]] && PLAYOUT_DELAY_SET=1
 DOMAIN=""
 API_KEY="ts3stream"
 API_SECRET=""
@@ -53,6 +56,8 @@ Options:
   --ts3-dir DIR          TeamSpeak 3 server directory (default: auto-detect)
   --reset-ts3-query      If the password is unknown, reset it automatically (server restart)
   --version TAG          Control API release tag, e.g. v0.3.1 (default: latest)
+  --playout-delay-ms MS   A/V buffer: 0..5000, steps of 10 (new installs: 2000)
+                         Requires viewer plugin 0.3.8+; existing setting is preserved
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
   --skip-dns-check       Do not verify that the domain points to this server
@@ -104,7 +109,7 @@ read_env_value() {
 }
 
 load_existing_config() {
-    local file=/etc/ts3stream/control.env
+    local file="${1:-/etc/ts3stream/control.env}"
     [[ -r "$file" ]] || return 0
     local key secret client pass addr public_url
     key="$(read_env_value LIVEKIT_API_KEY "$file")"
@@ -113,6 +118,10 @@ load_existing_config() {
     pass="$(read_env_value TS3_QUERY_PASSWORD "$file")"
     addr="$(read_env_value TS3_QUERY_ADDR "$file")"
     public_url="$(read_env_value TS3STREAM_PUBLIC_URL "$file")"
+    if [[ "$PLAYOUT_DELAY_SET" -eq 0 ]]; then
+        PLAYOUT_DELAY_MS="$(read_env_value TS3STREAM_PLAYOUT_DELAY_MS "$file")"
+        PLAYOUT_DELAY_MS="${PLAYOUT_DELAY_MS:-0}"
+    fi
 
     if [[ -n "$key" && "$API_KEY" == "ts3stream" ]]; then API_KEY="$key"; fi
     [[ -z "$API_SECRET" ]] && API_SECRET="$secret"
@@ -139,6 +148,7 @@ parse_args() {
             --ts3-dir) TS3_SERVER_DIR="${2:-}"; shift 2 ;;
             --reset-ts3-query) RESET_TS3_QUERY=1; shift ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
+            --playout-delay-ms) PLAYOUT_DELAY_MS="${2:-}"; PLAYOUT_DELAY_SET=1; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
             --no-firewall) CONFIGURE_FIREWALL=0; shift ;;
@@ -206,6 +216,10 @@ check_domain_dns() {
 
 ask_settings() {
     load_existing_config
+    [[ "$PLAYOUT_DELAY_MS" =~ ^[0-9]{1,4}$ ]] || die "invalid --playout-delay-ms"
+    PLAYOUT_DELAY_MS=$((10#$PLAYOUT_DELAY_MS))
+    (( PLAYOUT_DELAY_MS <= 5000 && PLAYOUT_DELAY_MS % 10 == 0 )) || die "playout delay must be 0..5000 in steps of 10 ms"
+    log "A/V buffer: ${PLAYOUT_DELAY_MS} ms (requires viewer plugin 0.3.8+)"
     DOMAIN="${DOMAIN#http://}"
     DOMAIN="${DOMAIN#https://}"
     DOMAIN="${DOMAIN%/}"
@@ -678,6 +692,7 @@ EOF
     cat > /etc/ts3stream/control.env <<EOF
 TS3STREAM_CONTROL_ADDR=${control_addr}
 TS3STREAM_CLIENT_KEY=${CLIENT_KEY}
+TS3STREAM_PLAYOUT_DELAY_MS=${PLAYOUT_DELAY_MS}
 LIVEKIT_API_KEY=${API_KEY}
 LIVEKIT_API_SECRET=${API_SECRET}
 LIVEKIT_URL=${livekit_url}
@@ -924,6 +939,5 @@ main() {
     print_result
 }
 
-main "$@"
-
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
 

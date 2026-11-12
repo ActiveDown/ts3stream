@@ -18,6 +18,8 @@ struct CapturedVideoFrame {
     std::vector<uint8_t> bgra;
 };
 
+// WGC for windows/modern Windows monitors; DXGI for monitors on systems that
+// cannot disable the WGC border (notably released Windows 10 client builds).
 class WgcCapture {
 public:
     using FrameCallback = std::function<void(CapturedVideoFrame)>;

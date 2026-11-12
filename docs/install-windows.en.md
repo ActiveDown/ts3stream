@@ -122,6 +122,8 @@ Ports `7880/TCP`, `7881/TCP` and `7882/UDP` must be reachable by clients.
 ```powershell
 cd C:\TS3Stream
 $env:TS3STREAM_CONTROL_ADDR = "0.0.0.0:8081"
+# Matching two-second A/V buffer; viewers require plugin 0.3.8+.
+$env:TS3STREAM_PLAYOUT_DELAY_MS = "2000"
 $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
 $env:LIVEKIT_API_SECRET = "PASTE_SECRET"
@@ -177,7 +179,7 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Install and configure the Windows client plugin
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.6.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.8.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to `SERVER_IP:9987`.
 
 Normally no manual file is needed. The plugin reads the welcome marker, calls

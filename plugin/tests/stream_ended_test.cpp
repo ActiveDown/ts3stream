@@ -1,4 +1,5 @@
 #include "media/livekit_engine.h"
+#include "log.h"
 #include "ui/fullscreen_window.h"
 #include "ui/stream_panel.h"
 
@@ -18,6 +19,7 @@
 // url, targetIdentity, publisherToken, otherToken and viewerToken. Never commit it.
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    ts3stream::diag::initLog();
     app.setQuitOnLastWindowClosed(false);
     if (argc != 3 && argc != 4) return 2;
     const bool staticSource = argc == 4 && std::string(argv[3]) == "static";

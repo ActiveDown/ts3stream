@@ -122,6 +122,8 @@ cd C:\TS3Stream
 ```powershell
 cd C:\TS3Stream
 $env:TS3STREAM_CONTROL_ADDR = "0.0.0.0:8081"
+# Буфер видео и звука 2 с; зрителям нужен плагин 0.3.8+.
+$env:TS3STREAM_PLAYOUT_DELAY_MS = "2000"
 $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
 $env:LIVEKIT_API_SECRET = "PASTE_SECRET"
@@ -177,7 +179,7 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Установка и настройка плагина Windows-клиента
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.3.6.ts3_plugin` через TeamSpeak Package Installer.
+2. Установите `ts3stream-0.3.8.ts3_plugin` через TeamSpeak Package Installer.
 3. Запустите TS3 и подключитесь к `SERVER_IP:9987`.
 
 Обычно ничего вводить не нужно. Плагин читает welcome-маркер, вызывает

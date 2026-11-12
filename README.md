@@ -9,12 +9,16 @@ Discord-style screen and application streaming inside **stock TeamSpeak 3** on W
 - **Stock TS3 client only**: a regular TeamSpeak 3 plugin (API 26, x64) for TS3 3.6.2. Neither the client nor the server binary is patched.
 - **Stream toolbar button**, enabled only while connected to a TS3 server.
 - **One stream per client**; starting a second stream is blocked in the UI and in code.
-- **30 / 60 / Auto FPS**, selectable **720p / 1080p / 1440p** (default 1080p, no upscaling), adaptive H.264 bitrate up to 12 Mbit/s.
+- **30 / 60 / Auto FPS**, selectable **720p / 1080p / 1440p** (default 1080p, no upscaling), default H.264 encoder ceiling **10 Mbit/s**. Audio, retransmissions and short network bursts are additional; `TS3STREAM_MAX_BITRATE` can override the ceiling.
+- **Borderless monitor capture on Windows 10** via DXGI when WGC border control is unavailable. Individual-window capture stays on WGC and may still show a border; automatic backend selection needs confirmation on an actual Windows 10 system.
+- **Paced, newest-frame-only encoder input** and a framerate-priority degradation setting; viewers subscribe only to the selected publisher instead of downloading every stream in the room.
+- **WebRTC diagnostics** every approximately two seconds: bitrate/FPS, encode/decode time, sender queue/jitter-buffer delay, loss, retransmissions and freezes. See [0.3.8 findings and buffering limitations](docs/release-0.3.8.md).
+- **Two-second A/V buffering** is enabled automatically on fresh server installations: WebRTC video buffering plus matching bounded PCM delay. Viewers require 0.3.8+; existing servers/rooms retain their previous mode until upgraded. [Configuration and rollout](docs/buffered-playback.md).
 - **Window resize and browser fullscreen** continue streaming on the same video track without freezing or reconnecting viewers.
 - **Application or system audio** via WASAPI process loopback; TeamSpeak audio is excluded and audio fails closed if a second TS3 client appears.
 - **One LiveKit room per TS3 channel**, red LIVE badges, in-client viewer.
 - **Explicit watch actions**: client context menu, client info button, LIVE badge popup, or the **active streams** toolbar menu. Row clicks only select the client.
-- **Playback mute and 0–100% volume** in every viewer mode, independent of TeamSpeak voices and outgoing capture.
+- **Playback mute and 0–125% volume** in every viewer mode, with 100% default and saturating PCM amplification, independent of TeamSpeak voices and outgoing capture.
 - **Viewing and publishing are independent**: starting a stream does not open the viewer; closing the viewer does not stop the stream.
 - **Detach / Embed** the viewer into a separate movable window while keeping TeamSpeak available.
 - **Fullscreen** on the viewer's current monitor, including a detached viewer, with a semi-transparent members bar and large controls.
@@ -70,7 +74,9 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Useful options: `--version v0.3.6` to pin the control API release, `--no-firewall`, `--help`.
+Useful options: `--version v0.3.8` to pin the control API release, `--no-firewall`, `--help`.
+
+Fresh installs enable 2000 ms A/V buffering. Use `--playout-delay-ms 0` to disable it. Reinstalling preserves the existing delay (legacy configs: 0); update viewers before explicitly enabling it on an older deployment.
 
 If you only have a public IP and no domain:
 
@@ -129,7 +135,9 @@ For LAN/IP without TLS:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.6`.
+Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.8`.
+
+Fresh installs enable 2000 ms A/V buffering; override with `-PlayoutDelayMs 0` or `2000`. Existing settings are preserved on reinstall unless explicitly overridden. Viewers must use plugin 0.3.8+ for buffered audio/video.
 
 The stock TS3 server is installed separately; the installer only checks that it
 is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-windows.en.md).
@@ -137,7 +145,7 @@ is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-w
 ### Windows client
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.6.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.8.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to the server.
 
 No manual config is normally needed: the plugin reads the `[ts3stream]...[/ts3stream]`

@@ -174,7 +174,7 @@ void AudioRenderer::stop() {
 }
 
 void AudioRenderer::setVolume(int percent) {
-    impl_->volumePercent.store(std::clamp(percent, 0, 100));
+    impl_->volumePercent.store(std::clamp(percent, 0, kMaxPlaybackVolumePercent));
 }
 
 void AudioRenderer::push(const int16_t* samples, int frames, int channels) {

@@ -1,4 +1,5 @@
 #include "stream_panel.h"
+#include "media/playback_gain.h"
 
 #include <QHBoxLayout>
 #include <QApplication>
@@ -173,10 +174,10 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
     muteButton_->setMinimumWidth(94);
     volumeSlider_ = new QSlider(Qt::Horizontal, audioControls_);
     volumeSlider_->setObjectName(QStringLiteral("ts3stream_volume"));
-    volumeSlider_->setRange(0, 100);
+    volumeSlider_->setRange(0, media::kMaxPlaybackVolumePercent);
     volumeSlider_->setValue(100);
     volumeSlider_->setFixedWidth(120);
-    volumeSlider_->setToolTip(QStringLiteral("Громкость стрима (не влияет на голоса TeamSpeak)"));
+    volumeSlider_->setToolTip(QStringLiteral("Громкость стрима: до 125% (не влияет на голоса TeamSpeak)"));
     volumeSlider_->setAccessibleName(QStringLiteral("Громкость стрима"));
     volumeLabel_ = new QLabel(QStringLiteral("100%"), audioControls_);
     volumeLabel_->setMinimumWidth(38);
@@ -307,7 +308,7 @@ void StreamPanel::setOnPlaybackAudioChanged(std::function<void(int, bool)> callb
 }
 
 void StreamPanel::setPlaybackAudio(int volumePercent, bool muted) {
-    volumePercent_ = qBound(0, volumePercent, 100);
+    volumePercent_ = qBound(0, volumePercent, media::kMaxPlaybackVolumePercent);
     muted_ = muted;
     const QSignalBlocker muteBlocker(muteButton_);
     const QSignalBlocker volumeBlocker(volumeSlider_);

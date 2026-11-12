@@ -19,6 +19,7 @@ add_library(ts3stream_diag SHARED
     src/diag/widget_dump.cpp
     src/diag/ui_probe.cpp
     src/media/wgc_capture.cpp
+    src/media/desktop_capture.cpp
     src/media/window_enumerator.cpp
     src/media/audio_devices.cpp
     src/media/audio_renderer.cpp
@@ -80,15 +81,33 @@ endif()
 
 option(TS3STREAM_BUILD_UI_TESTS "Build interactive native fullscreen regression test" OFF)
 if (TS3STREAM_BUILD_UI_TESTS)
-    add_executable(wgc_resize_test tests/wgc_resize_test.cpp src/media/wgc_capture.cpp src/log.cpp)
+    add_executable(wgc_resize_test tests/wgc_resize_test.cpp src/media/wgc_capture.cpp
+        src/media/desktop_capture.cpp src/log.cpp)
     target_include_directories(wgc_resize_test PRIVATE src)
     target_link_libraries(wgc_resize_test PRIVATE Qt5::Widgets d3d11 dxgi windowsapp runtimeobject)
     target_compile_definitions(wgc_resize_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_executable(desktop_frame_test tests/desktop_frame_test.cpp)
+    add_executable(video_send_queue_test tests/video_send_queue_test.cpp)
+    add_executable(rtc_diagnostics_test tests/rtc_diagnostics_test.cpp)
+    add_executable(delayed_audio_test tests/delayed_audio_test.cpp)
+    target_include_directories(delayed_audio_test PRIVATE src)
+    target_include_directories(rtc_diagnostics_test PRIVATE src "${LIVEKIT_SDK_DIR}/include")
+    target_compile_definitions(rtc_diagnostics_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_include_directories(video_send_queue_test PRIVATE src)
+    target_compile_definitions(video_send_queue_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_include_directories(desktop_frame_test PRIVATE src)
+    target_compile_definitions(desktop_frame_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_executable(desktop_capture_test tests/desktop_capture_test.cpp src/media/desktop_capture.cpp src/log.cpp)
+    target_include_directories(desktop_capture_test PRIVATE src)
+    target_link_libraries(desktop_capture_test PRIVATE Qt5::Widgets d3d11 dxgi runtimeobject)
+    target_compile_definitions(desktop_capture_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
     add_executable(viewer_autohide_test tests/viewer_autohide_test.cpp src/ui/stream_panel.cpp)
     target_include_directories(viewer_autohide_test PRIVATE src)
     target_link_libraries(viewer_autohide_test PRIVATE Qt5::Widgets)
     if (MSVC)
         target_compile_options(wgc_resize_test PRIVATE /utf-8 /permissive- /Zc:__cplusplus)
+        target_compile_options(desktop_frame_test PRIVATE /utf-8 /W4)
+        target_compile_options(desktop_capture_test PRIVATE /utf-8 /W4 /permissive- /Zc:__cplusplus)
         target_compile_options(viewer_autohide_test PRIVATE /utf-8)
     endif()
     add_executable(source_picker_test tests/source_picker_test.cpp src/ui/source_picker.cpp)
@@ -129,6 +148,14 @@ if (TS3STREAM_BUILD_UI_TESTS)
         src/ui/fullscreen_window.cpp
         src/ui/stream_panel.cpp
     )
+    add_executable(scene_change_test tests/scene_change_test.cpp src/media/livekit_engine.cpp src/log.cpp)
+    target_include_directories(scene_change_test PRIVATE src "${LIVEKIT_SDK_DIR}/include")
+    target_link_libraries(scene_change_test PRIVATE Qt5::Core "${LIVEKIT_SDK_DIR}/lib/livekit.lib" delayimp)
+    target_compile_definitions(scene_change_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if (MSVC)
+        target_compile_options(scene_change_test PRIVATE /utf-8)
+        target_link_options(scene_change_test PRIVATE /DELAYLOAD:livekit.dll)
+    endif()
     target_include_directories(stream_ended_test PRIVATE src "${LIVEKIT_SDK_DIR}/include")
     target_link_libraries(stream_ended_test PRIVATE Qt5::Widgets user32
         "${LIVEKIT_SDK_DIR}/lib/livekit.lib" delayimp)
