@@ -1144,7 +1144,9 @@ void StreamUi::startViewer() {
     viewerLivekit_ = engine;
     startPanelTimer();
     panel_->setTitle(QStringLiteral("Тестовый стрим"));
-    panel_->setSubtitle(engine->playbackDelayMs() > 0
+    panel_->setSubtitle(engine->serverBufferDelayMs() > 0
+        ? QStringLiteral("LiveKit · серверный буфер A/V %1 с").arg(engine->serverBufferDelayMs() / 1000.0, 0, 'f', 1)
+        : engine->playbackDelayMs() > 0
         ? QStringLiteral("LiveKit · буфер A/V %1 с").arg(engine->playbackDelayMs() / 1000.0, 0, 'f', 1)
         : QStringLiteral("LiveKit viewer"));
     panel_->setLive(true);
@@ -1281,7 +1283,9 @@ void StreamUi::startViewerForRoom(QString room, QString targetIdentity, QString 
         viewerLivekit_ = engine;
         startPanelTimer();
         panel_->setTitle(QStringLiteral("Стрим: %1").arg(nickname));
-        panel_->setSubtitle(engine->playbackDelayMs() > 0
+        panel_->setSubtitle(engine->serverBufferDelayMs() > 0
+            ? QStringLiteral("канал %1 · серверный буфер A/V %2 с").arg(room).arg(engine->serverBufferDelayMs() / 1000.0, 0, 'f', 1)
+            : engine->playbackDelayMs() > 0
             ? QStringLiteral("канал %1 · буфер A/V %2 с").arg(room).arg(engine->playbackDelayMs() / 1000.0, 0, 'f', 1)
             : QStringLiteral("канал %1 · LiveKit").arg(room));
         panel_->setLive(true);

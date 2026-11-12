@@ -1,5 +1,7 @@
 # Buffered A/V playback (0.3.8+)
 
+> **Legacy mode.** Long-session testing found accumulating A/V skew in this client-compensation design. For 0.3.9+ use [server-side buffering](server-buffered-playback.md). The description below documents 0.3.8 compatibility, not the recommended new-install mode.
+
 ## Русский
 
 **Новая установка Linux/Windows автоматически включает 2000 мс для видео и звука.** Все зрители должны использовать плагин 0.3.8 или новее. Повторный запуск основного Linux- или Windows-установщика сохраняет прежнюю настройку; старый конфиг без параметра означает 0 мс, чтобы не нарушить просмотр на старых клиентах.

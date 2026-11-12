@@ -20,6 +20,9 @@ set -euo pipefail
 REPO="${TS3STREAM_REPO:-ActiveDown/ts3stream}"
 CONTROL_VERSION="${TS3STREAM_VERSION:-}"
 PLAYOUT_DELAY_MS="${TS3STREAM_PLAYOUT_DELAY_MS:-2000}"
+BUFFER_MODE="${TS3STREAM_BUFFER_MODE:-server}"
+BUFFER_MODE_SET=0
+[[ -n "${TS3STREAM_BUFFER_MODE:-}" ]] && BUFFER_MODE_SET=1
 PLAYOUT_DELAY_SET=0
 [[ -n "${TS3STREAM_PLAYOUT_DELAY_MS:-}" ]] && PLAYOUT_DELAY_SET=1
 DOMAIN=""
@@ -45,6 +48,7 @@ Options:
   --client-key KEY       Shared key for the TS3 plugin (default: generated)
   --version TAG          Control API release tag, e.g. v0.2.1 (default: latest)
   --playout-delay-ms MS   A/V buffer: 0..5000, steps of 10 (default: 2000; plugin 0.3.8+)
+  --buffer-mode MODE      server (new installs) or client (legacy); existing setting preserved
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
   --livekit-archive URL  Override the LiveKit Linux amd64 archive URL
@@ -81,6 +85,7 @@ parse_args() {
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
             --playout-delay-ms) PLAYOUT_DELAY_MS="${2:-}"; PLAYOUT_DELAY_SET=1; shift 2 ;;
+            --buffer-mode) BUFFER_MODE="${2:-}"; BUFFER_MODE_SET=1; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
             --no-firewall) CONFIGURE_FIREWALL=0; shift ;;
@@ -108,6 +113,13 @@ check_os() {
 }
 
 ask_settings() {
+    if [[ "$BUFFER_MODE_SET" -eq 0 && -r /etc/ts3stream/control.env ]]; then
+        local previous_mode
+        previous_mode="$(grep '^TS3STREAM_BUFFER_MODE=' /etc/ts3stream/control.env | tail -n 1 || true)"
+        BUFFER_MODE="${previous_mode#*=}"
+        BUFFER_MODE="${BUFFER_MODE:-client}"
+    fi
+    [[ "$BUFFER_MODE" == server || "$BUFFER_MODE" == client ]] || die "buffer mode must be server or client"
     if [[ "$PLAYOUT_DELAY_SET" -eq 0 && -r /etc/ts3stream/control.env ]]; then
         local previous_delay
         previous_delay="$(grep '^TS3STREAM_PLAYOUT_DELAY_MS=' /etc/ts3stream/control.env | tail -n 1 || true)"
@@ -117,7 +129,7 @@ ask_settings() {
     [[ "$PLAYOUT_DELAY_MS" =~ ^[0-9]{1,4}$ ]] || die "invalid --playout-delay-ms"
     PLAYOUT_DELAY_MS=$((10#$PLAYOUT_DELAY_MS))
     (( PLAYOUT_DELAY_MS <= 5000 && PLAYOUT_DELAY_MS % 10 == 0 )) || die "playout delay must be 0..5000 in steps of 10 ms"
-    log "A/V buffer: ${PLAYOUT_DELAY_MS} ms (requires viewer plugin 0.3.8+)"
+    log "A/V buffer: ${PLAYOUT_DELAY_MS} ms, mode=${BUFFER_MODE} (server mode requires TS3Stream LiveKit)"
     DOMAIN="${DOMAIN#http://}"
     DOMAIN="${DOMAIN#https://}"
     DOMAIN="${DOMAIN%/}"
@@ -217,6 +229,15 @@ download_control() {
 }
 
 download_livekit() {
+    if [[ "$BUFFER_MODE" == server && -z "$LIVEKIT_ARCHIVE" ]]; then
+        local release="latest/download"
+        [[ -n "$CONTROL_VERSION" ]] && release="download/${CONTROL_VERSION}"
+        local target=/opt/ts3stream/bin/livekit-server
+        curl -fL --retry 3 -o "${target}.new" "https://github.com/${REPO}/releases/${release}/ts3stream-livekit-linux-amd64"
+        chmod 0755 "${target}.new"
+        mv -f "${target}.new" "$target"
+        return
+    fi
     local url="${LIVEKIT_ARCHIVE}"
     if [[ -z "${url}" ]]; then
         log "resolving latest LiveKit linux amd64 release"
@@ -275,6 +296,7 @@ EOF
 TS3STREAM_CONTROL_ADDR=${control_addr}
 TS3STREAM_CLIENT_KEY=${CLIENT_KEY}
 TS3STREAM_PLAYOUT_DELAY_MS=${PLAYOUT_DELAY_MS}
+TS3STREAM_BUFFER_MODE=${BUFFER_MODE}
 LIVEKIT_API_KEY=${API_KEY}
 LIVEKIT_API_SECRET=${API_SECRET}
 LIVEKIT_URL=${livekit_url}

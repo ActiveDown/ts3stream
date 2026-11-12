@@ -35,6 +35,7 @@ public:
 
     bool isConnected() const;
     int playbackDelayMs() const;
+    int serverBufferDelayMs() const;
 
     void setVideoFrameCallback(VideoFrameCallback callback);
     void setAudioFrameCallback(AudioFrameCallback callback);

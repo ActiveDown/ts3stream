@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 
 namespace ts3stream::media {
@@ -20,6 +21,14 @@ public:
     void setVolume(int percent);
 
     void push(const int16_t* samples, int frames, int channels);
+
+    struct Stats {
+        size_t queuedFrames;
+        uint64_t droppedFrames;
+        uint64_t submittedFrames;
+        uint64_t outputErrors;
+    };
+    Stats stats() const;
 
 private:
     struct Impl;

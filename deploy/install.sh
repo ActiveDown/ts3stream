@@ -4,7 +4,7 @@ set -euo pipefail
 # Installs TS3Stream server-side components. Run as root.
 # Expected files next to this script:
 #   ts3stream-control        (linux/amd64)
-#   livekit-server           (download from livekit/livekit releases)
+#   livekit-server           (TS3Stream LiveKit build from the matching release)
 #   livekit.yaml.example
 #   control.env.example
 #   livekit.service

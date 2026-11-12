@@ -9,6 +9,10 @@ int main() {
         if (!ok) { ++failures; std::printf("FAIL: %s\n", description); }
     };
     check(roomAudioDelayMs("ts3stream-av-delay-v1:2000") == 2000, "room contract");
+    check(roomAudioDelayMs("ts3stream-server-av-v1:2000") == 0 &&
+          roomServerDelayMs("ts3stream-server-av-v1:2000") == 2000 &&
+          roomServerDelayMs("ts3stream-av-delay-v1:2000") == 0,
+          "server delay never creates client PCM compensation");
     for (const auto& text : {"", "2000", "ts3stream-av-delay-v1:-1", "ts3stream-av-delay-v1:6000",
                             "ts3stream-av-delay-v1:2001", "ts3stream-av-delay-v1:2000extra",
                             "ts3stream-av-delay-v1:99999999999999999"}) {

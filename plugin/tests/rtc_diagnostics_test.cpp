@@ -48,6 +48,24 @@ int main() {
           "idle reports zero rates without division by zero");
     check(diagnostics.update({}, 9).empty(), "removed tracks are forgotten");
     check(diagnostics.update(stats(), 11).empty(), "reappearing track gets fresh baseline");
+    RtcInboundRtpStats audio{};
+    audio.rtc.id = "audio-in"; audio.stream.kind = "audio";
+    SessionStats audioStats;
+    audioStats.subscriber_stats = {RtcStats{audio}};
+    check(diagnostics.update(audioStats, 13).empty(), "audio establishes its own baseline");
+    audio.inbound.bytes_received = 8000;
+    audio.inbound.total_samples_received = 96000;
+    audio.inbound.jitter_buffer_emitted_count = 96000;
+    audio.inbound.jitter_buffer_delay = 96000 * 0.4;
+    audio.inbound.jitter_buffer_target_delay = 96000 * 2.0;
+    audio.inbound.inserted_samples_for_deceleration = 1920;
+    audio.inbound.removed_samples_for_acceleration = 480;
+    audio.inbound.concealed_samples = 960;
+    audioStats.subscriber_stats = {RtcStats{audio}};
+    lines = diagnostics.update(audioStats, 15);
+    check(lines.size() == 1 && lines[0].find("samples_s=48000.0 jitter_buffer_ms=400.00 target_ms=2000.00") != std::string::npos &&
+          lines[0].find("concealed=960 inserted=1920 removed=480") != std::string::npos,
+          "audio buffer growth and time stretching measured separately from video");
     std::printf("RTC diagnostics counter deltas: failures=%d\n", failures);
     return failures ? 1 : 0;
 }

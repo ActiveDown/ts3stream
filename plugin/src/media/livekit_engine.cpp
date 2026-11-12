@@ -150,6 +150,7 @@ struct LiveKitEngine::Impl {
     DelayedAudio delayedAudio;
     std::mutex audioDelayMutex;
     std::atomic<int> audioDelayMs{-1};
+    std::atomic<int> serverDelayMs{0};
     std::atomic<bool> audioReceiving{false};
     std::atomic<int64_t> videoNotBeforeUs{0};
 
@@ -161,6 +162,9 @@ struct LiveKitEngine::Impl {
         std::lock_guard<std::mutex> lock(audioDelayMutex);
         if (!audioReceiving.load() || audioDelayMs.load() >= 0) return;
         const int delay = roomAudioDelayMs(connectedRoom.roomInfo().metadata);
+        const int serverDelay = roomServerDelayMs(connectedRoom.roomInfo().metadata);
+        serverDelayMs.store(serverDelay);
+        if (serverDelay > 0) diag::log("LiveKit server A/V buffer=%d ms; client PCM compensation=0 ms", serverDelay);
         if (delay > 0) {
             delayedAudio.start(delay, [this](const int16_t* pcm, int frames, int channels, int rate) {
                 deliverAudio(pcm, frames, channels, rate);
@@ -282,6 +286,7 @@ struct LiveKitEngine::Impl {
         }
         delegate.reset();
         audioDelayMs.store(-1);
+        serverDelayMs.store(0);
         videoNotBeforeUs.store(0);
 
         videoSource.reset();
@@ -538,6 +543,10 @@ bool LiveKitEngine::isConnected() const {
 
 int LiveKitEngine::playbackDelayMs() const {
     return std::max(0, impl_->audioDelayMs.load());
+}
+
+int LiveKitEngine::serverBufferDelayMs() const {
+    return impl_->serverDelayMs.load();
 }
 
 void LiveKitEngine::setVideoFrameCallback(VideoFrameCallback callback) {

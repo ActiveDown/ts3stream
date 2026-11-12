@@ -75,9 +75,8 @@ ServerQuery для TS3Stream не нужен, но ключ привилегии
 
 ## 3. Установка LiveKit для Windows
 
-1. Скачайте Windows amd64 архив `livekit_<version>_windows_amd64.zip` со страницы
-   <https://github.com/livekit/livekit/releases>.
-2. Распакуйте `livekit-server.exe` в `C:\TS3Stream`.
+1. Скачайте `ts3stream-livekit.exe` из <https://github.com/ActiveDown/ts3stream/releases/tag/v0.3.9>.
+2. Сохраните как `C:\TS3Stream\livekit-server.exe`. Серверному буферу нужна именно эта сборка TS3Stream.
 3. Сгенерируйте секрет API:
 
 ```powershell
@@ -122,7 +121,8 @@ cd C:\TS3Stream
 ```powershell
 cd C:\TS3Stream
 $env:TS3STREAM_CONTROL_ADDR = "0.0.0.0:8081"
-# Буфер видео и звука 2 с; зрителям нужен плагин 0.3.8+.
+# Серверный буфер A/V 2 с; нужна сборка TS3Stream LiveKit из релиза 0.3.9+.
+$env:TS3STREAM_BUFFER_MODE = "server"
 $env:TS3STREAM_PLAYOUT_DELAY_MS = "2000"
 $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
@@ -179,7 +179,7 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Установка и настройка плагина Windows-клиента
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.3.8.ts3_plugin` через TeamSpeak Package Installer.
+2. Установите `ts3stream-0.3.9.ts3_plugin` через TeamSpeak Package Installer.
 3. Запустите TS3 и подключитесь к `SERVER_IP:9987`.
 
 Обычно ничего вводить не нужно. Плагин читает welcome-маркер, вызывает

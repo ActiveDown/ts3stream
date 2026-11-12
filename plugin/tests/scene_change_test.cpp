@@ -26,8 +26,10 @@ int main(int argc, char** argv) {
     if (!file.open(QIODevice::ReadOnly)) return 2;
     const auto config = QJsonDocument::fromJson(file.readAll()).object();
     const int expectedDelayMs = config.value("expectedDelayMs").toInt();
+    const int expectedClientDelayMs = config.value("expectedClientDelayMs").toInt(expectedDelayMs);
     const int viewerStartMs = config.value("viewerStartMs").toInt();
     const int reconnectAtMs = config.value("reconnectAtMs").toInt();
+    const int warmupMs = std::clamp(config.value("warmupMs").toInt(), 0, 300000);
     auto value = [&](const char* key) { return config.value(key).toString().toStdString(); };
     ts3stream::media::LiveKitEngine publisher, other, viewer;
     std::string error;
@@ -47,6 +49,7 @@ int main(int argc, char** argv) {
     double previousVideo = 0, maxGap = 0, steadyGap = 0;
     std::atomic<double> lastConnectMs{0};
     int previousId = -1;
+    size_t receivedFrames = 0;
     std::atomic<int> invalid{0};
     viewer.setVideoFrameCallback([&](int width, int height, const uint8_t* pixels, int stride, int64_t) {
         if (width != 1920 || height != 1080) { ++invalid; return; }
@@ -59,7 +62,7 @@ int main(int argc, char** argv) {
         const double now = clock.nsecsElapsed() / 1e6;
         std::lock_guard<std::mutex> lock(mutex);
         if (id == previousId) return;
-        if (videoDelays.size() < 5 || (previousVideo && now - previousVideo > 200)) {
+        if (receivedFrames++ < 5 || (previousVideo && now - previousVideo > 200)) {
             std::printf("video sample id=%d previous=%d arrival_ms=%.1f delay_ms=%.1f gap_ms=%.1f\n",
                 id, previousId, now, now - sent / 1000.0, previousVideo ? now - previousVideo : 0);
         }
@@ -69,7 +72,7 @@ int main(int argc, char** argv) {
             steadyGap = std::max(steadyGap, now - previousVideo);
         }
         previousVideo = now;
-        videoDelays.push_back(now - sent / 1000.0);
+        if (now >= warmupMs) videoDelays.push_back(now - sent / 1000.0);
         scenes[std::min(5, id / 60)] = true;
     });
     viewer.setAudioFrameCallback([&](const int16_t* samples, int frames, int channels, int rate) {
@@ -94,13 +97,16 @@ int main(int argc, char** argv) {
         if (pulse < 0 || best < second * 2) return;
         const double now = clock.nsecsElapsed() / 1e6;
         std::lock_guard<std::mutex> lock(mutex);
-        if (!audioReceived[pulse]) audioReceived[pulse] = now;
+        if (!audioReceived[pulse]) {
+            audioReceived[pulse] = now;
+            std::printf("audio pulse=%d arrival_ms=%.1f delay_ms=%.1f\n", pulse, now, now - audioSent[pulse]);
+        }
     });
     bool connectionOk = true;
     auto connectViewer = [&] {
         lastConnectMs.store(clock.nsecsElapsed() / 1e6);
         if (!viewer.connect(value("url"), value("viewerToken"), true, error, value("targetIdentity")) ||
-            viewer.playbackDelayMs() != expectedDelayMs) {
+            viewer.playbackDelayMs() != expectedClientDelayMs) {
             std::fprintf(stderr, "viewer/delay contract: %s actual_delay=%d\n", error.c_str(), viewer.playbackDelayMs());
             connectionOk = false;
         }
@@ -123,10 +129,12 @@ int main(int argc, char** argv) {
         }
     }
     int id = 0;
+    int sentFrames = 0;
     QTimer videoTimer;
     videoTimer.setTimerType(Qt::PreciseTimer);
     QObject::connect(&videoTimer, &QTimer::timeout, &app, [&] {
-        if (id >= 360) { videoTimer.stop(); return; }
+        if (sentFrames >= 360 + warmupMs / 33) { videoTimer.stop(); return; }
+        id = sentFrames % 360;
         ts3stream::media::CapturedVideoFrame frame;
         frame.width = 1920; frame.height = 1080; frame.stride = 1920 * 4;
         frame.bgra = pictures[id / 60];
@@ -148,9 +156,9 @@ int main(int argc, char** argv) {
         unwanted.width = 640; unwanted.height = 360; unwanted.stride = 640 * 4;
         unwanted.bgra.assign(640 * 360 * 4, 200);
         other.pushVideo(std::move(unwanted));
-        ++id;
+        ++sentFrames;
     });
-    int audioTick = 0;
+    int audioTick = -warmupMs / 20;
     QTimer audioTimer;
     audioTimer.setTimerType(Qt::PreciseTimer);
     QObject::connect(&audioTimer, &QTimer::timeout, &app, [&] {
@@ -173,7 +181,7 @@ int main(int argc, char** argv) {
     audioTimer.start(20);
     if (viewerStartMs > 0) QTimer::singleShot(viewerStartMs, &app, connectViewer);
     if (reconnectAtMs > 0) QTimer::singleShot(reconnectAtMs, &app, connectViewer);
-    QTimer::singleShot(17000, &app, [&] { app.quit(); });
+    QTimer::singleShot(warmupMs + 17000, &app, [&] { app.quit(); });
     app.exec();
     videoTimer.stop(); audioTimer.stop();
     viewer.disconnect(); publisher.disconnect(); other.disconnect();

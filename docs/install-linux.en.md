@@ -151,15 +151,12 @@ key: it is the only way to become server admin in the TS3 client.
 
 ## 3. Install LiveKit
 
-Download the latest Linux amd64 archive from
-<https://github.com/livekit/livekit/releases> and extract the `livekit-server`
-binary. Example for v1.13.11:
+Use the TS3Stream LiveKit build from the matching release for server-side buffering:
 
 ```bash
 cd /tmp
-curl -L -o livekit.tar.gz \
-  https://github.com/livekit/livekit/releases/download/v1.13.11/livekit_1.13.11_linux_amd64.tar.gz
-tar -xzf livekit.tar.gz
+curl -fL -o livekit-server \
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.9/ts3stream-livekit-linux-amd64
 sudo install -m 0755 livekit-server /opt/ts3stream/bin/livekit-server
 ```
 
@@ -228,7 +225,7 @@ Download `ts3stream-control-linux-amd64` from the TS3Stream release page:
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.8/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.9/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -236,7 +233,8 @@ Create `/etc/ts3stream/control.env` (replace both secrets):
 
 ```bash
 TS3STREAM_CONTROL_ADDR=127.0.0.1:8081
-# Matching two-second A/V buffer; viewers require plugin 0.3.8+.
+# Two-second server-side A/V buffer; requires TS3Stream LiveKit 0.3.9+.
+TS3STREAM_BUFFER_MODE=server
 TS3STREAM_PLAYOUT_DELAY_MS=2000
 TS3STREAM_CLIENT_KEY=PASTE_CLIENT_KEY
 LIVEKIT_API_KEY=ts3stream
@@ -355,7 +353,7 @@ Do **not** expose `7880` or `8081` directly; Caddy proxies them on localhost.
 
 ## 7. Install and configure the Windows client
 
-1. Install `ts3stream-0.3.8.ts3_plugin` with the TeamSpeak Package Installer.
+1. Install `ts3stream-0.3.9.ts3_plugin` with the TeamSpeak Package Installer.
 2. Start TS3, connect to your server.
 
 Normally no manual file is needed. The plugin reads the

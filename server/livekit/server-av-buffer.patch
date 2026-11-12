@@ -1,0 +1,419 @@
+diff --git a/pkg/rtc/mediatrack.go b/pkg/rtc/mediatrack.go
+index 895216f..bf82e85 100644
+--- a/pkg/rtc/mediatrack.go
++++ b/pkg/rtc/mediatrack.go
+@@ -72,6 +72,7 @@ type MediaTrack struct {
+ }
+ 
+ type MediaTrackParams struct {
++	ServerAVClock                    *sfu.ServerAVClock
+ 	ParticipantID                    func() livekit.ParticipantID
+ 	ParticipantIdentity              livekit.ParticipantIdentity
+ 	ParticipantVersion               uint32
+@@ -417,6 +418,7 @@ func (t *MediaTrack) AddReceiver(receiver *webrtc.RTPReceiver, track sfu.TrackRe
+ 			sfu.WithAudioConfig(t.params.AudioConfig),
+ 			sfu.WithLoadBalanceThreshold(t.getReceiverLBThreshold()),
+ 			sfu.WithForwardStats(t.params.ForwardStats),
++			sfu.WithServerAVClock(t.params.ServerAVClock),
+ 			sfu.WithEnableRTPStreamRestartDetection(t.params.EnableRTPStreamRestartDetection),
+ 		)
+ 		newWR.OnCloseHandler(func() {
+diff --git a/pkg/rtc/participant.go b/pkg/rtc/participant.go
+index 63376ed..355456c 100644
+--- a/pkg/rtc/participant.go
++++ b/pkg/rtc/participant.go
+@@ -222,6 +222,7 @@ type ParticipantParams struct {
+ 	SubscribePacer                    *SubscribePacer
+ 	PlayoutDelay                      *livekit.PlayoutDelay
+ 	SyncStreams                       bool
++	ServerAVClock                     *sfu.ServerAVClock
+ 	ForwardStats                      *sfu.ForwardStats
+ 	DisableSenderReportPassThrough    bool
+ 	MetricConfig                      metric.MetricConfig
+@@ -3700,6 +3701,7 @@ func (p *ParticipantImpl) addMigratedTrack(cid string, ti *livekit.TrackInfo) *M
+ 
+ func (p *ParticipantImpl) addMediaTrack(signalCid string, ti *livekit.TrackInfo) *MediaTrack {
+ 	mt := NewMediaTrack(MediaTrackParams{
++		ServerAVClock:          p.params.ServerAVClock,
+ 		ParticipantID:          p.ID,
+ 		ParticipantIdentity:    p.params.Identity,
+ 		ParticipantVersion:     p.version.Load(),
+diff --git a/pkg/rtc/room.go b/pkg/rtc/room.go
+index a67adf7..a8eeeab 100644
+--- a/pkg/rtc/room.go
++++ b/pkg/rtc/room.go
+@@ -253,6 +253,12 @@ func NewRoom(
+ 	agentStore AgentStore,
+ 	egressLauncher EgressLauncher,
+ ) *Room {
++	if sfu.ServerAVDelay(room.Metadata) > 0 {
++		// Retain up to five seconds at the supported 10 Mbit/s plus NACK
++		// recovery headroom. Allocation remains bounded per source/layer.
++		config.Receiver.PacketBufferSizeVideo = max(config.Receiver.PacketBufferSizeVideo, 16384)
++		config.Receiver.PacketBufferSizeAudio = max(config.Receiver.PacketBufferSizeAudio, 2048)
++	}
+ 	r := &Room{
+ 		protoRoom: proto.CloneOf(room),
+ 		internal:  internal,
+diff --git a/pkg/service/roommanager.go b/pkg/service/roommanager.go
+index 6a70c6b..9683f88 100644
+--- a/pkg/service/roommanager.go
++++ b/pkg/service/roommanager.go
+@@ -489,7 +489,16 @@ func (r *RoomManager) StartSession(
+ 	}
+ 
+ 	enableWarp := !useOneShotSignallingMode && r.config.RTC.EnableWarp
++	var serverAVClock *sfu.ServerAVClock
++	if delay := sfu.ServerAVDelay(protoRoom.Metadata); delay > 0 {
++		if roomInternal.GetPlayoutDelay().GetEnabled() {
++			return fmt.Errorf("server A/V buffering cannot be combined with client playout delay")
++		}
++		serverAVClock = &sfu.ServerAVClock{Delay: delay}
++		pLogger.Infow("TS3Stream server A/V buffering enabled", "delay", delay)
++	}
+ 	participant, err = rtc.NewParticipant(rtc.ParticipantParams{
++		ServerAVClock:            serverAVClock,
+ 		Identity:                 pi.Identity,
+ 		Name:                     pi.Name,
+ 		SID:                      sid,
+diff --git a/pkg/service/server.go b/pkg/service/server.go
+index 421ed58..91af15d 100644
+--- a/pkg/service/server.go
++++ b/pkg/service/server.go
+@@ -133,6 +133,14 @@ func NewLivekitServer(conf *config.Config,
+ 	whipService.SetupRoutes(mux)
+ 	mux.Handle("/agent", agentWSService)
+ 	mux.HandleFunc("/", s.defaultHandler)
++	mux.HandleFunc("/ts3stream/buffering", func(w http.ResponseWriter, r *http.Request) {
++		if r.Method != http.MethodGet {
++			w.WriteHeader(http.StatusMethodNotAllowed)
++			return
++		}
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"protocol":"ts3stream-server-av-v1","maxDelayMs":5000}`))
++	})
+ 
+ 	// NewHTTPHandler branches on a nil handler, which a typed-nil would defeat
+ 	var agentFront http.Handler
+diff --git a/pkg/sfu/buffer/buffer_base.go b/pkg/sfu/buffer/buffer_base.go
+index 03cf77e..c541f04 100644
+--- a/pkg/sfu/buffer/buffer_base.go
++++ b/pkg/sfu/buffer/buffer_base.go
+@@ -954,6 +954,11 @@ func (b *BufferBase) HandleIncomingPacketLocked(
+ 		if (b.extPacketTooMuchCount.Inc()-1)%100 == 0 {
+ 			b.logger.Warnw("too much ext packets", nil, "count", b.extPackets.Len())
+ 		}
++		// The packet payload cache has already evicted these sequence numbers.
++		// Bound metadata too, including while a server A/V forwarder is waiting.
++		for b.extPackets.Len() > b.bucket.Capacity() {
++			ReleaseExtPacket(b.extPackets.PopFront())
++		}
+ 	}
+ 
+ 	b.maybeGrowBucket(arrivalTime)
+diff --git a/pkg/sfu/buffer/server_av_buffer_test.go b/pkg/sfu/buffer/server_av_buffer_test.go
+new file mode 100644
+index 0000000..ccb59ff
+--- /dev/null
++++ b/pkg/sfu/buffer/server_av_buffer_test.go
+@@ -0,0 +1,23 @@
++package buffer
++
++import (
++	"github.com/livekit/livekit-server/pkg/sfu/testutils/rtptest"
++	"github.com/pion/transport/v4/packetio"
++	"github.com/stretchr/testify/require"
++	"testing"
++)
++
++func TestServerAVBufferBoundsMetadataWhileForwarderWaits(t *testing.T) {
++	factory := NewFactoryOfBufferFactory(500, 200).CreateBufferFactory()
++	primary := factory.GetOrNew(packetio.RTPBufferPacket, fecTestMediaSSRC).(*Buffer)
++	defer primary.Close()
++	bindFECTestBuffer(t, primary)
++	packets := rtptest.GenerateVP8Packets(100, 5000, uint8(vp8Codec.PayloadType), fecTestMediaSSRC)
++	for i := range packets {
++		writePacket(t, primary, &packets[i])
++	}
++	primary.Lock()
++	defer primary.Unlock()
++	require.Greater(t, primary.extPackets.Len(), 0)
++	require.LessOrEqual(t, primary.extPackets.Len(), primary.bucket.Capacity())
++}
+diff --git a/pkg/sfu/receiver.go b/pkg/sfu/receiver.go
+index 0bc5663..28c225e 100644
+--- a/pkg/sfu/receiver.go
++++ b/pkg/sfu/receiver.go
+@@ -51,6 +51,13 @@ type WebRTCReceiver struct {
+ 
+ type ReceiverOpts func(w *WebRTCReceiver) *WebRTCReceiver
+ 
++func WithServerAVClock(clock *ServerAVClock) ReceiverOpts {
++	return func(w *WebRTCReceiver) *WebRTCReceiver {
++		w.ReceiverBase.serverAVClock = clock
++		return w
++	}
++}
++
+ // WithPliThrottleConfig indicates minimum time(ms) between sending PLIs
+ func WithPliThrottleConfig(pliThrottleConfig PLIThrottleConfig) ReceiverOpts {
+ 	return func(w *WebRTCReceiver) *WebRTCReceiver {
+diff --git a/pkg/sfu/receiver_base.go b/pkg/sfu/receiver_base.go
+index 8b34920..1a57e47 100644
+--- a/pkg/sfu/receiver_base.go
++++ b/pkg/sfu/receiver_base.go
+@@ -117,7 +117,9 @@ type ReceiverBaseParams struct {
+ }
+ 
+ type ReceiverBase struct {
+-	params ReceiverBaseParams
++	params        ReceiverBaseParams
++	serverAVClock *ServerAVClock
++	serverAVDone  chan struct{}
+ 
+ 	pliThrottleConfig               PLIThrottleConfig
+ 	audioConfig                     AudioConfig
+@@ -162,6 +164,7 @@ type ReceiverBase struct {
+ 
+ func NewReceiverBase(params ReceiverBaseParams, trackInfo *livekit.TrackInfo, codecState ReceiverCodecState) *ReceiverBase {
+ 	r := &ReceiverBase{
++		serverAVDone:   make(chan struct{}),
+ 		params:         params,
+ 		codecState:     codecState,
+ 		isRED:          mime.IsMimeTypeStringRED(params.Codec.MimeType),
+@@ -192,6 +195,7 @@ func (r *ReceiverBase) Close(reason string, clearBuffers bool) {
+ 	if r.isClosed.Swap(true) {
+ 		return
+ 	}
++	close(r.serverAVDone)
+ 
+ 	if clearBuffers {
+ 		r.ClearAllBuffers(reason)
+@@ -918,6 +922,9 @@ func (r *ReceiverBase) forwardRTP(
+ 	}
+ 
+ 	pktBuf := make([]byte, bucket.RTPMaxPktSize)
++	avTimer := time.NewTimer(time.Hour)
++	avTimer.Stop()
++	defer avTimer.Stop()
+ 	r.params.Logger.Debugw(
+ 		"starting forwarding",
+ 		"layer", layer,
+@@ -933,6 +940,27 @@ func (r *ReceiverBase) forwardRTP(
+ 		if extPkt == nil {
+ 			continue
+ 		}
++		if r.serverAVClock != nil && r.serverAVClock.Delay > 0 {
++			// ReadExtended owns extPkt and pktBuf until the next read. Remaining
++			// packets stay in the bounded ingress bucket, which also serves NACKs.
++			due, ready := r.serverAVClock.Wait(extPkt.Arrival, extPkt.Packet.Timestamp,
++				r.params.Codec.ClockRate, buff.GetSenderReportData, r.serverAVDone, func() bool {
++					return !r.isClosed.Load() && r.forwardersGeneration.Load() == forwarderGeneration
++				}, avTimer)
++			if !ready {
++				buffer.ReleaseExtPacket(extPkt)
++				return
++			}
++			// A stalled server must not replay a burst of seconds-old content.
++			if mono.UnixNano()-due > int64(250*time.Millisecond) {
++				numPacketsDropped++
++				if r.Kind() == webrtc.RTPCodecTypeVideo {
++					buff.SendPLI(false)
++				}
++				buffer.ReleaseExtPacket(extPkt)
++				continue
++			}
++		}
+ 		dequeuedAt := mono.UnixNano()
+ 
+ 		if extPkt.Packet.PayloadType != uint8(r.params.Codec.PayloadType) {
+@@ -977,7 +1005,7 @@ func (r *ReceiverBase) forwardRTP(
+ 		// delivered back-to-back) which the single forwarder goroutine drains
+ 		// serially, inflating the measured transit for the tail of the burst. That
+ 		// reflects loss recovery rather than steady-state forwarding health.
+-		if writeCount > 0 && r.forwardStats != nil && !extPkt.IsBuffered && !extPkt.IsOutOfOrder {
++		if writeCount > 0 && r.forwardStats != nil && r.serverAVClock == nil && !extPkt.IsBuffered && !extPkt.IsOutOfOrder {
+ 			if latency, isHigh := r.forwardStats.Update(extPkt.Arrival, mono.UnixNano()); isHigh {
+ 				r.params.Logger.Debugw(
+ 					"high forwarding latency",
+diff --git a/pkg/sfu/server_av_buffer.go b/pkg/sfu/server_av_buffer.go
+new file mode 100644
+index 0000000..80645ac
+--- /dev/null
++++ b/pkg/sfu/server_av_buffer.go
+@@ -0,0 +1,88 @@
++// Copyright 2026 TS3Stream contributors. Licensed under Apache-2.0.
++package sfu
++
++import (
++	"strconv"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/livekit/mediatransportutil"
++	"github.com/livekit/protocol/livekit"
++	"github.com/livekit/protocol/utils/mono"
++)
++
++const ServerAVBufferPrefix = "ts3stream-server-av-v1:"
++
++// ServerAVDelay is deliberately a different contract from client playout delay.
++// An ordinary LiveKit room and a legacy TS3Stream room remain untouched.
++func ServerAVDelay(metadata string) time.Duration {
++	if !strings.HasPrefix(metadata, ServerAVBufferPrefix) {
++		return 0
++	}
++	value := strings.TrimPrefix(metadata, ServerAVBufferPrefix)
++	ms, err := strconv.Atoi(value)
++	if err != nil || ms < 10 || ms > 5000 || ms%10 != 0 || strconv.Itoa(ms) != value {
++		return 0
++	}
++	return time.Duration(ms) * time.Millisecond
++}
++
++// Cancelable absolute wait shared by the production RTP forwarder and tests.
++// Re-read SR during initial fill, since the first report can arrive after RTP.
++func (c *ServerAVClock) Wait(arrival int64, timestamp, rate uint32,
++	report func() *livekit.RTCPSenderReportState, done <-chan struct{}, valid func() bool, timer *time.Timer) (int64, bool) {
++	for valid() {
++		due := c.Deadline(arrival, timestamp, rate, report())
++		wait := time.Duration(due - mono.UnixNano())
++		if wait <= 0 {
++			return due, true
++		}
++		timer.Reset(min(wait, 50*time.Millisecond))
++		select {
++		case <-done:
++			return 0, false
++		case <-timer.C:
++		}
++	}
++	return 0, false
++}
++
++// One shared mapping per publisher, not per track or subscriber. RTCP SR maps
++// 48 kHz audio and 90 kHz video onto the SAME sender NTP timeline. Deadlines
++// are absolute server monotonic timestamps; no sleep(delay) per packet and no
++// cumulative drift. Until the first SR, arrival-time delay is the fallback.
++type ServerAVClock struct {
++	Delay    time.Duration
++	mu       sync.Mutex
++	anchored bool
++	offset   int64
++}
++
++func (c *ServerAVClock) Deadline(arrival int64, timestamp uint32, rate uint32, sr *livekit.RTCPSenderReportState) int64 {
++	fallback := arrival + int64(c.Delay)
++	if sr == nil || sr.NtpTimestamp == 0 || rate == 0 {
++		return fallback
++	}
++	// Signed subtraction handles 32-bit RTP rollover without changing epochs.
++	ticks := int64(int32(timestamp - sr.RtpTimestamp))
++	if ticks > int64(rate)*30 || ticks < -int64(rate)*30 {
++		return fallback
++	}
++	capture := mediatransportutil.NtpTime(sr.NtpTimestamp).Time().UnixNano() + ticks*int64(time.Second)/int64(rate)
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if !c.anchored {
++		c.offset = arrival - capture
++		c.anchored = true
++	}
++	due := capture + c.offset + int64(c.Delay)
++	// A publisher clock discontinuity must never pin a forwarder indefinitely.
++	// Reset the shared mapping, so both tracks recover together rather than
++	// accumulating independent offsets. Normal uplink jitter spends the buffer.
++	if due > fallback+int64(time.Second) || due < arrival-int64(5*time.Second) {
++		c.offset = arrival - capture
++		return fallback
++	}
++	return due
++}
+diff --git a/pkg/sfu/server_av_buffer_test.go b/pkg/sfu/server_av_buffer_test.go
+new file mode 100644
+index 0000000..cadfe1c
+--- /dev/null
++++ b/pkg/sfu/server_av_buffer_test.go
+@@ -0,0 +1,71 @@
++package sfu
++
++import (
++	"testing"
++	"time"
++
++	"github.com/livekit/mediatransportutil"
++	"github.com/livekit/protocol/livekit"
++	"github.com/livekit/protocol/utils/mono"
++	"github.com/stretchr/testify/require"
++)
++
++func TestServerAVContract(t *testing.T) {
++	require.Equal(t, 2*time.Second, ServerAVDelay("ts3stream-server-av-v1:2000"))
++	for _, value := range []string{"", "ts3stream-av-delay-v1:2000", "ts3stream-server-av-v1:2001",
++		"ts3stream-server-av-v1:5001", "ts3stream-server-av-v1:02000", "ts3stream-server-av-v1:-10"} {
++		require.Zero(t, ServerAVDelay(value), value)
++	}
++}
++
++func TestServerAVWaitDeadlineAndCancellation(t *testing.T) {
++	timer := time.NewTimer(time.Hour)
++	timer.Stop()
++	defer timer.Stop()
++	done := make(chan struct{})
++	noReport := func() *livekit.RTCPSenderReportState { return nil }
++	c := &ServerAVClock{Delay: 30 * time.Millisecond}
++	start := mono.UnixNano()
++	due, ok := c.Wait(start, 0, 48000, noReport, done, func() bool { return true }, timer)
++	require.True(t, ok)
++	require.Equal(t, start+int64(c.Delay), due)
++	require.GreaterOrEqual(t, mono.UnixNano(), due, "never forward before deadline")
++	c.Delay = 5 * time.Second
++	close(done)
++	start = mono.UnixNano()
++	_, ok = c.Wait(start, 0, 48000, noReport, done, func() bool { return true }, timer)
++	require.False(t, ok)
++	require.Less(t, mono.UnixNano()-start, int64(100*time.Millisecond), "close interrupts buffer filling")
++	_, ok = c.Wait(start, 0, 48000, noReport, nil, func() bool { return false }, timer)
++	require.False(t, ok, "restarted stream cannot forward an old generation")
++}
++
++func TestServerAVSharedClockLongRunAndRollover(t *testing.T) {
++	c := &ServerAVClock{Delay: 2 * time.Second}
++	start := time.Unix(1800000000, 0)
++	// Different RTP rates, offsets, and wraparound; same capture clock.
++	audioBase, videoBase := uint32(0xfffff000), uint32(0xffff0000)
++	for ms := int64(0); ms <= 1800000; ms += 20 {
++		capture := start.Add(time.Duration(ms) * time.Millisecond)
++		srTime := capture.Truncate(time.Second)
++		srMs := srTime.Sub(start).Milliseconds()
++		audioSR := &livekit.RTCPSenderReportState{NtpTimestamp: uint64(mediatransportutil.ToNtpTime(srTime)), RtpTimestamp: audioBase + uint32(srMs*48)}
++		videoSR := &livekit.RTCPSenderReportState{NtpTimestamp: audioSR.NtpTimestamp, RtpTimestamp: videoBase + uint32(srMs*90)}
++		// Sender wall clock is arbitrarily offset from server; network latency varies.
++		arrival := capture.UnixNano() + int64(7*time.Hour) + int64(20*time.Millisecond)
++		audioDue := c.Deadline(arrival, audioBase+uint32(ms*48), 48000, audioSR)
++		videoDue := c.Deadline(arrival+int64(time.Duration(ms%800)*time.Millisecond), videoBase+uint32(ms*90), 90000, videoSR)
++		require.Equal(t, audioDue, videoDue, "A/V capture instant must have the same deadline")
++		require.Equal(t, arrival+int64(2*time.Second), audioDue, "absolute schedule must not drift")
++	}
++}
++
++func TestServerAVMissingReportsAndClockDiscontinuity(t *testing.T) {
++	c := &ServerAVClock{Delay: 2 * time.Second}
++	now := time.Unix(1800000000, 0)
++	require.Equal(t, now.UnixNano()+int64(2*time.Second), c.Deadline(now.UnixNano(), 123, 48000, nil))
++	sr := &livekit.RTCPSenderReportState{NtpTimestamp: uint64(mediatransportutil.ToNtpTime(now)), RtpTimestamp: 123}
++	require.Equal(t, now.UnixNano()+int64(2*time.Second), c.Deadline(now.UnixNano(), 123, 48000, sr))
++	sr.NtpTimestamp = uint64(mediatransportutil.ToNtpTime(now.Add(time.Hour)))
++	require.Equal(t, now.UnixNano()+int64(2*time.Second), c.Deadline(now.UnixNano(), 123, 48000, sr), "clock jump cannot create an hour-long queue")
++}
+diff --git a/version/version.go b/version/version.go
+index 47bb7ac..114c007 100644
+--- a/version/version.go
++++ b/version/version.go
+@@ -14,4 +14,4 @@
+ 
+ package version
+ 
+-const Version = "1.13.11"
++const Version = "1.13.11-ts3stream.1"

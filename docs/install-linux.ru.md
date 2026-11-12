@@ -151,15 +151,12 @@ ServerQuery для TS3Stream не нужен, но ключ привилегии
 
 ## 3. Установка LiveKit
 
-Скачайте последний Linux amd64 архив со страницы
-<https://github.com/livekit/livekit/releases> и распакуйте `livekit-server`.
-Пример для v1.13.11:
+Для серверного буфера установите сборку TS3Stream LiveKit из соответствующего релиза:
 
 ```bash
 cd /tmp
-curl -L -o livekit.tar.gz \
-  https://github.com/livekit/livekit/releases/download/v1.13.11/livekit_1.13.11_linux_amd64.tar.gz
-tar -xzf livekit.tar.gz
+curl -fL -o livekit-server \
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.9/ts3stream-livekit-linux-amd64
 sudo install -m 0755 livekit-server /opt/ts3stream/bin/livekit-server
 ```
 
@@ -228,7 +225,7 @@ sudo systemctl enable --now livekit
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.8/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.9/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -236,7 +233,8 @@ sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 
 ```bash
 TS3STREAM_CONTROL_ADDR=127.0.0.1:8081
-# Буфер видео и звука 2 с; зрителям нужен плагин 0.3.8+.
+# Серверный буфер A/V 2 с; нужна сборка TS3Stream LiveKit из релиза 0.3.9+.
+TS3STREAM_BUFFER_MODE=server
 TS3STREAM_PLAYOUT_DELAY_MS=2000
 TS3STREAM_CLIENT_KEY=PASTE_CLIENT_KEY
 LIVEKIT_API_KEY=ts3stream
@@ -355,7 +353,7 @@ sudo ufw enable
 
 ## 7. Установка и настройка Windows-клиента
 
-1. Установите `ts3stream-0.3.8.ts3_plugin` через TeamSpeak Package Installer.
+1. Установите `ts3stream-0.3.9.ts3_plugin` через TeamSpeak Package Installer.
 2. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно. Плагин читает маркер

@@ -18,6 +18,8 @@ class RtcDiagnostics {
         uint64_t bytes = 0, frames = 0, packets = 0, retransmits = 0, bufferFrames = 0;
         uint64_t dropped = 0, freezes = 0, keyframes = 0, nack = 0, pli = 0;
         int64_t lost = 0;
+        uint64_t concealed = 0, inserted = 0, removed = 0;
+        double targetSeconds = 0;
     };
     std::map<std::string, Sample> previous_;
     template<class T> static T delta(T now, T old) { return now >= old ? now - old : T{}; }
@@ -31,6 +33,7 @@ public:
                 s.time = nowSeconds;
                 std::string id, implementation;
                 bool outbound = false;
+                bool audio = false;
                 unsigned width = 0, height = 0;
                 double target = 0;
                 int limitation = -1;
@@ -49,8 +52,9 @@ public:
                     limitation = static_cast<int>(v.quality_limitation_reason);
                     implementation = v.encoder_implementation;
                 } else if (const auto* in = std::get_if<livekit::RtcInboundRtpStats>(&record.stats)) {
-                    if (in->stream.kind != "video") continue;
-                    id = "rx/" + in->rtc.id;
+                    audio = in->stream.kind == "audio";
+                    if (!audio && in->stream.kind != "video") continue;
+                    id = std::string(audio ? "audio_rx/" : "rx/") + in->rtc.id;
                     const auto& v = in->inbound;
                     s.bytes = v.bytes_received; s.packets = in->received.packets_received;
                     s.lost = in->received.packets_lost; s.frames = v.frames_decoded;
@@ -61,6 +65,13 @@ public:
                     s.retransmits = v.retransmitted_packets_received;
                     width = v.frame_width; height = v.frame_height;
                     implementation = v.decoder_implementation;
+                    if (audio) {
+                        s.frames = v.total_samples_received;
+                        s.concealed = v.concealed_samples;
+                        s.inserted = v.inserted_samples_for_deceleration;
+                        s.removed = v.removed_samples_for_acceleration;
+                        s.targetSeconds = v.jitter_buffer_target_delay;
+                    }
                 } else {
                     continue;
                 }
@@ -74,6 +85,20 @@ public:
                 const auto frames = delta(s.frames, p.frames);
                 const auto bufferFrames = delta(s.bufferFrames, p.bufferFrames);
                 char line[1400]{};
+                if (audio) {
+                    std::snprintf(line, sizeof(line),
+                        "rtc audio_rx id=%s kbps=%.1f samples_s=%.1f jitter_buffer_ms=%.2f target_ms=%.2f "
+                        "lost=%lld concealed=%llu inserted=%llu removed=%llu",
+                        id.c_str(), delta(s.bytes, p.bytes) * 8.0 / dt / 1000, frames / dt,
+                        bufferFrames ? delta(s.bufferSeconds, p.bufferSeconds) * 1000 / bufferFrames : 0,
+                        bufferFrames ? delta(s.targetSeconds, p.targetSeconds) * 1000 / bufferFrames : 0,
+                        static_cast<long long>(delta(s.lost, p.lost)),
+                        static_cast<unsigned long long>(delta(s.concealed, p.concealed)),
+                        static_cast<unsigned long long>(delta(s.inserted, p.inserted)),
+                        static_cast<unsigned long long>(delta(s.removed, p.removed)));
+                    lines.emplace_back(line);
+                    continue;
+                }
                 std::snprintf(line, sizeof(line),
                     "rtc %s id=%s mbps=%.3f fps=%.1f size=%ux%u work_ms=%.2f %s_ms=%.2f "
                     "lost=%lld rtx=%llu dropped=%llu freezes=%llu keyframes=%llu nack=%llu pli=%llu "

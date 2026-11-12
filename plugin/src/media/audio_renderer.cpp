@@ -1,5 +1,6 @@
 #include "audio_renderer.h"
 #include "playback_gain.h"
+#include "audio_playout_queue.h"
 
 #include "../log.h"
 
@@ -8,9 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
 #include <cstring>
-#include <deque>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -22,7 +21,6 @@ constexpr int kOutputRate = 48000;
 constexpr int kOutputChannels = 2;
 constexpr int kBufferFrames = 960; // 20 ms
 constexpr int kBufferCount = 4;
-constexpr size_t kMaxQueuedSamples = static_cast<size_t>(kOutputRate) * kOutputChannels * 2;
 
 } // namespace
 
@@ -38,8 +36,9 @@ struct AudioRenderer::Impl {
     std::atomic<int> volumePercent{100};
 
     std::mutex mutex;
-    std::condition_variable cv;
-    std::deque<int16_t> queue;
+    AudioPlayoutQueue queue;
+    uint64_t submittedFrames = 0;
+    uint64_t outputErrors = 0;
 
     ~Impl() {
         stop();
@@ -47,14 +46,13 @@ struct AudioRenderer::Impl {
 
     void stop() {
         running.store(false);
-        cv.notify_all();
-        if (device) {
-            waveOutReset(device);
-        }
+        if (doneEvent) SetEvent(doneEvent);
         if (thread.joinable()) {
             thread.join();
         }
         if (device) {
+            // No concurrent waveOutWrite after resetting the device.
+            waveOutReset(device);
             for (int i = 0; i < kBufferCount; ++i) {
                 if (headers[i].dwFlags & WHDR_PREPARED) {
                     waveOutUnprepareHeader(device, &headers[i], sizeof(WAVEHDR));
@@ -68,24 +66,36 @@ struct AudioRenderer::Impl {
             doneEvent = nullptr;
         }
         buffers.clear();
+        std::memset(headers, 0, sizeof(headers));
         {
             std::lock_guard<std::mutex> lock(mutex);
             queue.clear();
+            submittedFrames = 0;
+            outputErrors = 0;
         }
     }
 
     void fillBuffer(int index) {
         auto& buffer = buffers[index];
-        std::fill(buffer.begin(), buffer.end(), 0);
-
-        std::lock_guard<std::mutex> lock(mutex);
-        const size_t wanted = static_cast<size_t>(kBufferFrames) * kOutputChannels;
-        size_t written = 0;
-        const int gain = volumePercent.load();
-        while (written < wanted && !queue.empty()) {
-            buffer[written++] = applyPlaybackGain(queue.front(), gain);
-            queue.pop_front();
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            queue.read(buffer.data(), kBufferFrames, AudioPlayoutQueue::Clock::now());
         }
+        const int gain = volumePercent.load();
+        for (auto& sample : buffer) sample = applyPlaybackGain(sample, gain);
+    }
+
+    bool submit(int index) {
+        const auto result = waveOutWrite(device, &headers[index], sizeof(WAVEHDR));
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (result == MMSYSERR_NOERROR) submittedFrames += kBufferFrames;
+            else ++outputErrors;
+        }
+        if (result == MMSYSERR_NOERROR) return true;
+        diag::log("AudioRenderer waveOutWrite failed: %u", result);
+        running.store(false);
+        return false;
     }
 
     void run() {
@@ -94,10 +104,19 @@ struct AudioRenderer::Impl {
             fillBuffer(i);
             headers[i].lpData = reinterpret_cast<LPSTR>(buffers[i].data());
             headers[i].dwBufferLength = static_cast<DWORD>(buffers[i].size() * sizeof(int16_t));
-            waveOutPrepareHeader(device, &headers[i], sizeof(WAVEHDR));
-            waveOutWrite(device, &headers[i], sizeof(WAVEHDR));
+            const auto result = waveOutPrepareHeader(device, &headers[i], sizeof(WAVEHDR));
+            if (result != MMSYSERR_NOERROR) {
+                { std::lock_guard<std::mutex> lock(mutex); ++outputErrors; }
+                diag::log("AudioRenderer waveOutPrepareHeader failed: %u", result);
+                running.store(false);
+                return;
+            }
+            if (!submit(i)) return;
         }
 
+        AudioBufferOrder order;
+        auto nextLog = AudioPlayoutQueue::Clock::now() + std::chrono::seconds(2);
+        uint64_t lastDropped = 0;
         while (running.load()) {
             const DWORD wait = WaitForSingleObject(doneEvent, 100);
             if (!running.load()) {
@@ -107,15 +126,25 @@ struct AudioRenderer::Impl {
                 continue;
             }
 
-            for (int i = 0; i < kBufferCount; ++i) {
-                if ((headers[i].dwFlags & WHDR_DONE) == 0) {
-                    continue;
-                }
-                headers[i].dwFlags &= ~WHDR_DONE;
+            order.refill(kBufferCount, [&](int i) {
+                return running.load() && (headers[i].dwFlags & WHDR_DONE) != 0;
+            }, [&](int i) {
                 fillBuffer(i);
-                headers[i].lpData = reinterpret_cast<LPSTR>(buffers[i].data());
-                headers[i].dwBufferLength = static_cast<DWORD>(buffers[i].size() * sizeof(int16_t));
-                waveOutWrite(device, &headers[i], sizeof(WAVEHDR));
+                return submit(i);
+            });
+            const auto now = AudioPlayoutQueue::Clock::now();
+            if (now >= nextLog) {
+                size_t queued;
+                double age;
+                uint64_t dropped;
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    queued = queue.queuedFrames(); age = queue.oldestMs(now); dropped = queue.droppedFrames();
+                }
+                diag::log("audio playout queue_ms=%.1f oldest_ms=%.1f dropped_ms=%.1f device_capacity_ms=80",
+                    queued / 48.0, age, (dropped - lastDropped) / 48.0);
+                lastDropped = dropped;
+                nextLog = now + std::chrono::seconds(2);
             }
         }
     }
@@ -184,20 +213,14 @@ void AudioRenderer::push(const int16_t* samples, int frames, int channels) {
 
     {
         std::lock_guard<std::mutex> lock(impl_->mutex);
-        for (int i = 0; i < frames; ++i) {
-            if (channels == 1) {
-                impl_->queue.push_back(samples[i]);
-                impl_->queue.push_back(samples[i]);
-            } else {
-                impl_->queue.push_back(samples[i * 2]);
-                impl_->queue.push_back(samples[i * 2 + 1]);
-            }
-        }
-        while (impl_->queue.size() > kMaxQueuedSamples) {
-            impl_->queue.pop_front();
-        }
+        if (!impl_->running.load()) return;
+        impl_->queue.push(samples, frames, channels, AudioPlayoutQueue::Clock::now());
     }
-    impl_->cv.notify_one();
+}
+
+AudioRenderer::Stats AudioRenderer::stats() const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    return {impl_->queue.queuedFrames(), impl_->queue.droppedFrames(), impl_->submittedFrames, impl_->outputErrors};
 }
 
 } // namespace ts3stream::media

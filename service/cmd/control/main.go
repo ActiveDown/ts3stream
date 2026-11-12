@@ -39,6 +39,8 @@ type config struct {
 	clientKey      string
 	query          ts3QueryConfig
 	playoutDelayMs int
+	bufferMode     string
+	bufferProbeURL string
 }
 
 type controlServer struct {
@@ -51,6 +53,8 @@ type controlServer struct {
 	query          ts3QueryConfig
 	registry       *streamRegistry
 	playoutDelayMs int
+	bufferMode     string
+	bufferProbeURL string
 }
 
 type registerRequest struct {
@@ -122,6 +126,8 @@ func newControlServer(cfg config) *controlServer {
 		query:          cfg.query,
 		registry:       newStreamRegistry(streamTTL),
 		playoutDelayMs: cfg.playoutDelayMs,
+		bufferMode:     cfg.bufferMode,
+		bufferProbeURL: cfg.bufferProbeURL,
 	}
 }
 
@@ -233,12 +239,23 @@ func (s *controlServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	// reads its ACTUAL metadata, so joining an older room cannot delay audio
 	// while video is still using the old unbuffered settings.
 	if s.playoutDelayMs > 0 {
-		accessToken.SetRoomConfig(&livekit.RoomConfiguration{
+		roomConfig := &livekit.RoomConfiguration{
 			MinPlayoutDelay: uint32(s.playoutDelayMs),
 			MaxPlayoutDelay: uint32(s.playoutDelayMs),
 			SyncStreams:     true,
 			Metadata:        fmt.Sprintf("ts3stream-av-delay-v1:%d", s.playoutDelayMs),
-		})
+		}
+		if s.bufferMode == "server" {
+			if err := verifyServerBuffer(r.Context(), s.bufferProbeURL, s.playoutDelayMs); err != nil {
+				log.Printf("server A/V buffer capability unavailable: %v", err)
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server A/V buffering requires the TS3Stream LiveKit build"})
+				return
+			}
+			roomConfig.MinPlayoutDelay = 0
+			roomConfig.MaxPlayoutDelay = 0
+			roomConfig.Metadata = fmt.Sprintf("ts3stream-server-av-v1:%d", s.playoutDelayMs)
+		}
+		accessToken.SetRoomConfig(roomConfig)
 	}
 
 	token, err := accessToken.ToJWT()
@@ -477,6 +494,10 @@ func main() {
 	if err != nil || playoutDelayMs < 0 || playoutDelayMs > 5000 || playoutDelayMs%10 != 0 {
 		log.Fatal("TS3STREAM_PLAYOUT_DELAY_MS must be 0..5000 in multiples of 10 milliseconds")
 	}
+	bufferMode := envOr("TS3STREAM_BUFFER_MODE", "client")
+	if bufferMode != "client" && bufferMode != "server" {
+		log.Fatal("TS3STREAM_BUFFER_MODE must be client or server")
+	}
 
 	query := ts3QueryConfig{
 		addr:     strings.TrimSpace(*ts3QueryAddr),
@@ -494,6 +515,8 @@ func main() {
 		clientKey:      *clientKey,
 		query:          query,
 		playoutDelayMs: playoutDelayMs,
+		bufferMode:     bufferMode,
+		bufferProbeURL: envOr("TS3STREAM_LIVEKIT_INTERNAL_URL", "http://127.0.0.1:7880"),
 	})
 
 	server := &http.Server{

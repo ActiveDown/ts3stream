@@ -24,6 +24,7 @@ param(
     [string]$ClientKey,
     [string]$Version,
     [ValidateRange(0,5000)][int]$PlayoutDelayMs = 2000,
+    [ValidateSet('server','client')][string]$BufferMode = 'server',
     [string]$InstallDir = 'C:\TS3Stream',
     [string]$Ts3Dir = 'C:\TS3Server',
     [string]$Ts3QueryPassword,
@@ -37,6 +38,15 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Repo = 'ActiveDown/ts3stream'
 $LogDir = Join-Path $InstallDir 'logs'
+
+if (-not $PSBoundParameters.ContainsKey('BufferMode') -and
+    (Test-Path (Join-Path $InstallDir 'start-control.cmd'))) {
+    $previousMode = Get-Content (Join-Path $InstallDir 'start-control.cmd') -Raw
+    $BufferMode = 'client'
+    if ($previousMode -match '(?m)^set "TS3STREAM_BUFFER_MODE=(server|client)"\s*$') {
+        $BufferMode = $Matches[1]
+    }
+}
 
 # A reinstall must not silently enable buffering for older viewer plugins.
 if (-not $PSBoundParameters.ContainsKey('PlayoutDelayMs') -and
@@ -94,7 +104,7 @@ if ([string]::IsNullOrWhiteSpace($ClientKey)) { $ClientKey = New-Secret 64 }
 
 Write-Step "Install directory: $InstallDir"
 Write-Step "TLS/Caddy: $(-not $NoTls)"
-Write-Step "A/V buffer: $PlayoutDelayMs ms (requires viewer plugin 0.3.8+)"
+Write-Step "A/V buffer: $PlayoutDelayMs ms, mode=$BufferMode (server mode requires TS3Stream LiveKit)"
 if (-not $Yes) {
     Write-Host ''
     Write-Host 'Install plan:'
@@ -160,6 +170,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 Download-File $controlUrl $controlExe
 
 # LiveKit
+if ($BufferMode -eq 'server') {
+    $livekitUrlDownload = $controlUrl.Replace('ts3stream-control.exe', 'ts3stream-livekit.exe')
+    Download-File $livekitUrlDownload (Join-Path $InstallDir 'livekit-server.exe')
+} else {
 $livekitRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/livekit/livekit/releases/latest' -Headers @{ 'User-Agent' = 'TS3Stream' }
 $livekitAsset = $livekitRelease.assets | Where-Object { $_.name -like '*windows_amd64.zip' } | Select-Object -First 1
 if (-not $livekitAsset) { Fail 'Could not find a LiveKit Windows amd64 archive.' }
@@ -169,6 +183,7 @@ $livekitExtract = Expand-Zip $livekitZip (Join-Path $env:TEMP 'livekit-windows')
 $livekitExeSource = Get-ChildItem $livekitExtract -Recurse -Filter 'livekit-server.exe' | Select-Object -First 1
 if (-not $livekitExeSource) { Fail 'livekit-server.exe not found in archive.' }
 Copy-Item $livekitExeSource.FullName (Join-Path $InstallDir 'livekit-server.exe') -Force
+}
 
 # Caddy (optional)
 $caddyExe = $null
@@ -238,6 +253,7 @@ cd /d "$InstallDir"
 set "TS3STREAM_CONTROL_ADDR=$controlAddr"
 set "TS3STREAM_CLIENT_KEY=$ClientKey"
 set "TS3STREAM_PLAYOUT_DELAY_MS=$PlayoutDelayMs"
+set "TS3STREAM_BUFFER_MODE=$BufferMode"
 set "LIVEKIT_API_KEY=$ApiKey"
 set "LIVEKIT_API_SECRET=$ApiSecret"
 set "LIVEKIT_URL=$livekitUrl"

@@ -1,0 +1,3 @@
+# Unified diff context prefixes intentionally precede tabs and blank lines.
+# Validate the patched source with git diff --check in the upstream checkout.
+*.patch text eol=lf -whitespace

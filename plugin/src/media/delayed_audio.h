@@ -17,14 +17,21 @@ namespace ts3stream::media {
 // Control API sets this marker AND matching min/max WebRTC playout delay in
 // RoomConfiguration. Read the actual room metadata, never the requested token
 // configuration: an already-existing room can retain its old settings.
-inline int roomAudioDelayMs(const std::string& metadata) {
-    constexpr char prefix[] = "ts3stream-av-delay-v1:";
-    constexpr size_t length = sizeof(prefix) - 1;
+inline int roomDelayMs(const std::string& metadata, const std::string& prefix) {
+    const size_t length = prefix.size();
     if (metadata.compare(0, length, prefix) != 0) return 0;
     int delay = 0;
     const auto result = std::from_chars(metadata.data() + length, metadata.data() + metadata.size(), delay);
     return result.ec == std::errc{} && result.ptr == metadata.data() + metadata.size() &&
         delay >= 0 && delay <= 5000 && delay % 10 == 0 ? delay : 0;
+}
+
+inline int roomAudioDelayMs(const std::string& metadata) {
+    return roomDelayMs(metadata, "ts3stream-av-delay-v1:");
+}
+
+inline int roomServerDelayMs(const std::string& metadata) {
+    return roomDelayMs(metadata, "ts3stream-server-av-v1:");
 }
 
 // Native WebRTC already timestamps/buffers compressed video. The C++ raw PCM

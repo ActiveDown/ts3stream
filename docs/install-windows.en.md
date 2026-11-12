@@ -75,9 +75,8 @@ become server admin in the client.
 
 ## 3. Install LiveKit for Windows
 
-1. Download the Windows amd64 archive `livekit_<version>_windows_amd64.zip` from
-   <https://github.com/livekit/livekit/releases>.
-2. Extract `livekit-server.exe` and put it in `C:\TS3Stream`.
+1. Download `ts3stream-livekit.exe` from <https://github.com/ActiveDown/ts3stream/releases/tag/v0.3.9>.
+2. Save it as `C:\TS3Stream\livekit-server.exe`. Server buffering requires this TS3Stream fork.
 3. Generate an API secret:
 
 ```powershell
@@ -122,7 +121,8 @@ Ports `7880/TCP`, `7881/TCP` and `7882/UDP` must be reachable by clients.
 ```powershell
 cd C:\TS3Stream
 $env:TS3STREAM_CONTROL_ADDR = "0.0.0.0:8081"
-# Matching two-second A/V buffer; viewers require plugin 0.3.8+.
+# Two-second server-side buffer; requires TS3Stream LiveKit 0.3.9+.
+$env:TS3STREAM_BUFFER_MODE = "server"
 $env:TS3STREAM_PLAYOUT_DELAY_MS = "2000"
 $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
@@ -179,7 +179,7 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Install and configure the Windows client plugin
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.8.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.9.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to `SERVER_IP:9987`.
 
 Normally no manual file is needed. The plugin reads the welcome marker, calls
