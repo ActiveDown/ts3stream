@@ -117,7 +117,8 @@ ask_settings() {
     [[ -n "${DOMAIN}" ]] || die "domain must not be empty"
 
     if [[ "${INSTALL_CADDY}" -eq 1 && "${DOMAIN}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        die "Caddy needs a DNS name, not an IP. Use --no-caddy for LAN/IP installation."
+        local freeDns="${DOMAIN//./-}.sslip.io"
+        die "Caddy needs a DNS name, not an IP. Re-run with --no-caddy for http/ws, or use a free DNS name such as ${freeDns} or FreeDNS (freedns.afraid.org) and open ports 80/443."
     fi
 
     if [[ -z "${API_SECRET}" ]]; then

@@ -65,6 +65,29 @@ sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
 
 Полезные опции: `--version v0.2.1` — зафиксировать релиз control API, `--no-firewall`, `--help`.
 
+Если есть только публичный IP и нет домена:
+
+```bash
+# Заработает сразу, но control API и токены пойдут по HTTP, без HTTPS.
+sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+```
+
+Для TLS без покупки домена используйте бесплатное wildcard-имя, которое
+указывает на ваш IP, например `95-142-44-214.sslip.io` (точки заменяются на дефисы):
+
+```bash
+sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+```
+
+Порты 80 и 443 должны быть доступны для сертификата Let's Encrypt.
+
+FreeDNS (<https://freedns.afraid.org/>) тоже подойдёт: создайте бесплатный
+поддомен с **A-записью** на ваш публичный IP, проверьте
+`dig +short yourname.mooo.com` и передайте этот hostname в `--domain`. Одного
+сертификата достаточно; на общих доменах FreeDNS действуют обычные лимиты
+Let's Encrypt. Не включайте прокси/CDN перед A-записью, если не проксируете
+одновременно WebSocket и UDP-медиа.
+
 После установки:
 
 ```bash

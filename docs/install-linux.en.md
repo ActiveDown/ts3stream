@@ -40,6 +40,31 @@ sudo bash install-ts3stream.sh --domain stream.example.com --yes
 sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
+Only a public IP, no domain:
+
+```bash
+# HTTP/WS, no TLS
+sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+
+# Free DNS + TLS: sslip.io resolves 95-142-44-214.sslip.io to 95.142.44.214
+sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+```
+
+`sslip.io` is a free wildcard DNS service; ports 80/443 must be reachable for
+Caddy to obtain a Let's Encrypt certificate. You can also use DuckDNS or any
+other DNS name you control.
+
+FreeDNS (<https://freedns.afraid.org/>) works as well:
+
+1. Register a free account and create a subdomain on one of the shared domains.
+2. Add an **A record** with destination `95.142.44.214` (your public IP).
+3. Verify: `dig +short yourname.mooo.com` — it must return the IP.
+4. Run the installer with `--domain yourname.mooo.com`.
+
+A single certificate for one subdomain is fine. Shared FreeDNS domains are
+subject to normal Let's Encrypt rate limits, and there must be no proxy/CDN in
+front of the A record unless it also forwards WebSocket and UDP media.
+
 If you prefer full control or use another distribution, follow the manual steps
 below.
 

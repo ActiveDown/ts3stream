@@ -183,6 +183,11 @@ Test-NetConnection 127.0.0.1 -Port 7880
 
 ## 8. TLS через Caddy для интернета (рекомендуется)
 
+Публичный TLS-сертификат требует DNS-имя, а не голый IP. Если своего домена нет,
+используйте FreeDNS (<https://freedns.afraid.org/>) или `sslip.io`:
+`95-142-44-214.sslip.io` (точки заменяются на дефисы). Создайте A-запись на
+публичный IP и проверьте `dig +short yourname.mooo.com` до запуска Caddy.
+
 1. Направьте DNS `stream.example.com` на публичный IP.
 2. Скачайте `caddy.exe` для Windows с <https://caddyserver.com/download> и
    положите в `C:\TS3Stream`.

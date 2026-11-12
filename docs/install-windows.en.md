@@ -183,6 +183,12 @@ Test-NetConnection 127.0.0.1 -Port 7880
 
 ## 8. Internet-facing TLS with Caddy (recommended for production)
 
+A public TLS certificate requires a DNS name, not a bare IP. If you do not own a
+domain, use FreeDNS (<https://freedns.afraid.org/>) or `sslip.io`:
+`95-142-44-214.sslip.io` (dots become dashes). Create an A record pointing to
+your public IP and verify it with `dig +short yourname.mooo.com` before running
+Caddy.
+
 1. Point DNS `stream.example.com` to the public IP.
 2. Download `caddy.exe` for Windows from <https://caddyserver.com/download> and
    put it in `C:\TS3Stream`.

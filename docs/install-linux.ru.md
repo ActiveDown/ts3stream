@@ -40,6 +40,31 @@ sudo bash install-ts3stream.sh --domain stream.example.com --yes
 sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
+Есть только публичный IP, без домена:
+
+```bash
+# HTTP/WS, без TLS
+sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+
+# Бесплатный DNS + TLS: sslip.io резолвит 95-142-44-214.sslip.io в 95.142.44.214
+sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+```
+
+`sslip.io` — бесплатный wildcard DNS; порты 80/443 должны быть доступны, чтобы
+Caddy получил сертификат Let's Encrypt. Можно также использовать DuckDNS или
+любое своё DNS-имя.
+
+FreeDNS (<https://freedns.afraid.org/>) тоже подойдёт:
+
+1. Зарегистрируйте бесплатный аккаунт и создайте поддомен на одном из общих доменов.
+2. Добавьте **A-запись** с адресом `95.142.44.214` (ваш публичный IP).
+3. Проверьте: `dig +short yourname.mooo.com` — должен вернуться этот IP.
+4. Запустите установщик с `--domain yourname.mooo.com`.
+
+Одного сертификата на поддомен достаточно. На общих доменах FreeDNS действуют
+обычные лимиты Let's Encrypt; перед A-записью не должно быть прокси/CDN, если он
+не проксирует одновременно WebSocket и UDP-медиа.
+
 Если нужен полный контроль или у вас другой дистрибутив — используйте ручные
 шаги ниже.
 
