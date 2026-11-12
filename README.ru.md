@@ -50,8 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/in
 - установит Caddy и получит TLS-сертификат;
 - создаст systemd-службы `livekit` и `ts3stream`;
 - сгенерирует секрет LiveKit API и общий ключ клиента;
+- найдёт пароль TS3 ServerQuery, включит UID-проверку и запишет маркер TS3Stream в welcome message сервера;
 - добавит правила UFW для портов стриминга;
-- выведет готовый `service.json` для Windows-клиента.
+- выведет `service.json` как ручной fallback.
 
 Неинтерактивные примеры:
 
@@ -63,7 +64,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Полезные опции: `--version v0.2.1` — зафиксировать релиз control API, `--no-firewall`, `--help`.
+Полезные опции: `--version v0.3.0` — зафиксировать релиз control API, `--no-firewall`, `--help`.
 
 Если есть только публичный IP и нет домена:
 
@@ -110,6 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 
 - скачает LiveKit, control API и (опционально) Caddy;
 - запишет `livekit.yaml`, `start-*.cmd`, `service.json`;
+- найдёт пароль TS3 ServerQuery, включит UID-проверку и запишет welcome-маркер;
 - добавит правила Windows Firewall;
 - создаст задачи автозапуска для LiveKit, control API и Caddy;
 - запустит службы и проверит `/api/health`;
@@ -121,7 +123,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.2.1`.
+Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.0`.
 
 Стоковый TS3-сервер ставится отдельно; установщик только проверяет, что он
 запущен. Подробная ручная инструкция: [`docs/install-windows.ru.md`](docs/install-windows.ru.md).
@@ -129,9 +131,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 ### Windows-клиент
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.2.1.ts3_plugin` через TeamSpeak Package Installer.
-3. Запустите TS3, подключитесь к серверу, нажмите **Стрим**.
-4. Создайте `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+2. Установите `ts3stream-0.3.0.ts3_plugin` через TeamSpeak Package Installer.
+3. Запустите TS3 и подключитесь к серверу.
+
+Обычно ничего вводить не нужно: плагин читает маркер `[ts3stream]...[/ts3stream]`
+из welcome message сервера, вызывает `/api/register`, проверяет ваш TS3 UID
+через ServerQuery и сам сохраняет `service.json`.
+
+Если автонастройка недоступна (установщик не нашёл пароль ServerQuery),
+создайте `%APPDATA%\TS3Client\plugins\ts3stream\service.json` вручную:
 
 ```json
 {
@@ -140,7 +148,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 }
 ```
 
-Установщик выводит точный JSON со сгенерированным ключом.
+После этого нажмите **Стрим**.
 
 ## Как это работает
 
@@ -201,5 +209,6 @@ docs/     установка Linux/Windows, архитектура, звук
 ## Лицензия
 
 MIT для оригинального кода. Заголовки TeamSpeak 3 SDK принадлежат TeamSpeak Systems GmbH. LiveKit — Apache-2.0, Qt — LGPL-3.0. Подробности в [NOTICE](NOTICE).
+
 
 

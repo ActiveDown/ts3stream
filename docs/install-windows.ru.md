@@ -124,11 +124,21 @@ $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
 $env:LIVEKIT_API_SECRET = "PASTE_SECRET"
 $env:LIVEKIT_URL = "ws://SERVER_IP:7880"
+$env:TS3STREAM_PUBLIC_URL = "http://SERVER_IP:8081"
+$env:TS3STREAM_WELCOME_AUTO = "1"
+$env:TS3_QUERY_ADDR = "127.0.0.1:10011"
+$env:TS3_QUERY_USER = "serveradmin"
+$env:TS3_QUERY_PASSWORD = "PASTE_QUERY_PASSWORD"
+$env:TS3_QUERY_SID = "1"
 .\ts3stream-control.exe
 ```
 
 `LIVEKIT_URL` возвращается всем TS3-клиентам, поэтому адрес должен быть
 реально доступен клиентам. `127.0.0.1` работает только если клиент на этом же ПК.
+
+Блок `TS3_QUERY_*` включает проверку UID и welcome-маркер. Установщик сам ищет
+пароль в `C:\TS3Server\logs`; если не нашёл — передайте `-Ts3QueryPassword` или
+используйте ручной `service.json`.
 
 4. Проверка:
 
@@ -165,9 +175,15 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Установка и настройка плагина Windows-клиента
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.2.1.ts3_plugin` через TeamSpeak Package Installer.
+2. Установите `ts3stream-0.3.0.ts3_plugin` через TeamSpeak Package Installer.
 3. Запустите TS3 и подключитесь к `SERVER_IP:9987`.
-4. Создайте `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+
+Обычно ничего вводить не нужно. Плагин читает welcome-маркер, вызывает
+`/api/register`, проверяет TS3 UID через ServerQuery и сам сохраняет
+`service.json`.
+
+Если `TS3_QUERY_PASSWORD` не настроен, создайте
+`%APPDATA%\TS3Client\plugins\ts3stream\service.json` вручную:
 
 ```json
 {
@@ -176,10 +192,9 @@ Test-NetConnection 127.0.0.1 -Port 7880
 }
 ```
 
-5. Перезапустите TS3.
-6. Нажмите **Стрим**. Кнопка активна только при подключении.
-7. Смотреть стрим можно через контекстное меню клиента, кнопку в панели клиента
-   или LIVE-бейдж. Запуск своего стрима панель просмотра не открывает.
+Затем перезапустите TS3. Нажмите **Стрим** — кнопка активна только при
+подключении. Смотреть стрим можно через контекстное меню клиента, кнопку в
+панели клиента или LIVE-бейдж. Запуск своего стрима панель просмотра не открывает.
 
 ## 8. TLS через Caddy для интернета (рекомендуется)
 

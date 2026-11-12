@@ -218,7 +218,7 @@ Download `ts3stream-control-linux-amd64` from the TS3Stream release page:
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.2.1/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.0/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -227,14 +227,26 @@ Create `/etc/ts3stream/control.env` (replace both secrets):
 ```bash
 TS3STREAM_CONTROL_ADDR=127.0.0.1:8081
 TS3STREAM_CLIENT_KEY=PASTE_CLIENT_KEY
-
 LIVEKIT_API_KEY=ts3stream
 LIVEKIT_API_SECRET=PASTE_SECRET
 LIVEKIT_URL=wss://stream.example.com
+
+# Auto-configuration / UID verification (installer fills these automatically)
+TS3STREAM_PUBLIC_URL=https://stream.example.com
+TS3STREAM_WELCOME_AUTO=1
+TS3_QUERY_ADDR=127.0.0.1:10011
+TS3_QUERY_USER=serveradmin
+TS3_QUERY_PASSWORD=PASTE_QUERY_PASSWORD
+TS3_QUERY_SID=1
 ```
 
 `LIVEKIT_URL` is returned to the Windows plugin, so it must be the public WSS
 address, not `127.0.0.1`.
+
+The `TS3_QUERY_*` block enables `/api/register` and the welcome message marker.
+The installer detects the ServerQuery password from the first-run TS3 logs. If
+you set it up manually and the password is missing, clients can still use a
+manual `service.json`. Control API logs the exact query error on startup.
 
 Create `/etc/systemd/system/ts3stream-control.service`:
 
@@ -331,9 +343,16 @@ Do **not** expose `7880` or `8081` directly; Caddy proxies them on localhost.
 
 ## 7. Install and configure the Windows client
 
-1. Install `ts3stream-0.2.1.ts3_plugin` with the TeamSpeak Package Installer.
+1. Install `ts3stream-0.3.0.ts3_plugin` with the TeamSpeak Package Installer.
 2. Start TS3, connect to your server.
-3. Create `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+
+Normally no manual file is needed. The plugin reads the
+`[ts3stream]https://...[/ts3stream]` marker from the TS3 welcome message, calls
+`/api/register`, verifies the TS3 UID through ServerQuery and saves
+`service.json` automatically.
+
+If auto-configuration is disabled (the installer did not find the ServerQuery
+password), create `%APPDATA%\TS3Client\plugins\ts3stream\service.json` manually:
 
 ```json
 {
@@ -342,10 +361,9 @@ Do **not** expose `7880` or `8081` directly; Caddy proxies them on localhost.
 }
 ```
 
-4. Restart TS3.
-5. The **Stream** button becomes active only while connected.
-6. Start a stream, then watch it from the client context menu, the client info
-   button, or the LIVE badge.
+Then restart TS3. The **Stream** button becomes active only while connected.
+Start a stream, then watch it from the client context menu, the client info
+button, or the LIVE badge.
 
 ## 8. Optional: TURN/TLS
 
@@ -434,5 +452,6 @@ Replace the plugin DLL on Windows with the new `.ts3_plugin` package.
   reachable.
 - **LiveKit does not start**: validate the YAML and make sure the API secret
   matches `control.env`.
+
 
 

@@ -218,7 +218,7 @@ sudo systemctl enable --now livekit
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.2.1/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.0/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -227,14 +227,26 @@ sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```bash
 TS3STREAM_CONTROL_ADDR=127.0.0.1:8081
 TS3STREAM_CLIENT_KEY=PASTE_CLIENT_KEY
-
 LIVEKIT_API_KEY=ts3stream
 LIVEKIT_API_SECRET=PASTE_SECRET
 LIVEKIT_URL=wss://stream.example.com
+
+# Автонастройка / проверка UID (установщик заполняет сам)
+TS3STREAM_PUBLIC_URL=https://stream.example.com
+TS3STREAM_WELCOME_AUTO=1
+TS3_QUERY_ADDR=127.0.0.1:10011
+TS3_QUERY_USER=serveradmin
+TS3_QUERY_PASSWORD=PASTE_QUERY_PASSWORD
+TS3_QUERY_SID=1
 ```
 
 `LIVEKIT_URL` возвращается Windows-плагину, поэтому это должен быть публичный
 WSS-адрес, а не `127.0.0.1`.
+
+Блок `TS3_QUERY_*` включает `/api/register` и запись welcome-маркера.
+Установщик сам находит пароль ServerQuery в логах первого запуска TS3. Если
+пароля нет, клиенты могут использовать ручной `service.json`; точная ошибка
+query будет в логе control API.
 
 Создайте `/etc/systemd/system/ts3stream-control.service`:
 
@@ -331,9 +343,16 @@ sudo ufw enable
 
 ## 7. Установка и настройка Windows-клиента
 
-1. Установите `ts3stream-0.2.1.ts3_plugin` через TeamSpeak Package Installer.
+1. Установите `ts3stream-0.3.0.ts3_plugin` через TeamSpeak Package Installer.
 2. Запустите TS3 и подключитесь к серверу.
-3. Создайте `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+
+Обычно ничего вводить не нужно. Плагин читает маркер
+`[ts3stream]https://...[/ts3stream]` из welcome message сервера, вызывает
+`/api/register`, проверяет TS3 UID через ServerQuery и сам сохраняет
+`service.json`.
+
+Если автонастройка отключена (установщик не нашёл пароль ServerQuery), создайте
+`%APPDATA%\TS3Client\plugins\ts3stream\service.json` вручную:
 
 ```json
 {
@@ -342,10 +361,9 @@ sudo ufw enable
 }
 ```
 
-4. Перезапустите TS3.
-5. Кнопка **Стрим** активна только при подключении к серверу.
-6. Запустите стрим и откройте просмотр через контекстное меню клиента, кнопку
-   в панели клиента или LIVE-бейдж.
+Затем перезапустите TS3. Кнопка **Стрим** активна только при подключении.
+Запустите стрим и откройте просмотр через контекстное меню клиента, кнопку в
+панели клиента или LIVE-бейдж.
 
 ## 8. Опционально: TURN/TLS
 
@@ -433,5 +451,6 @@ sudo systemctl start ts3stream-control
 - **Ошибка сертификата Caddy**: DNS должен указывать на сервер, порт 80 должен
   быть доступен.
 - **LiveKit не стартует**: проверьте YAML и совпадение секрета с `control.env`.
+
 
 

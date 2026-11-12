@@ -50,8 +50,9 @@ The installer prompts for the domain and confirmation, then:
 - installs Caddy and obtains a TLS certificate;
 - creates `livekit` and `ts3stream` systemd services;
 - generates the LiveKit API secret and the client shared key;
+- detects the TS3 ServerQuery password, enables UID-verified registration and writes the TS3Stream marker into the server welcome message;
 - adds UFW rules for the streaming ports;
-- prints a ready `service.json` for the Windows client.
+- prints a ready `service.json` as a manual fallback.
 
 Non-interactive examples:
 
@@ -63,7 +64,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Useful options: `--version v0.2.1` to pin the control API release, `--no-firewall`, `--help`.
+Useful options: `--version v0.3.0` to pin the control API release, `--no-firewall`, `--help`.
 
 If you only have a public IP and no domain:
 
@@ -110,6 +111,7 @@ The installer:
 
 - downloads LiveKit, the control API and (optionally) Caddy;
 - writes `livekit.yaml`, `start-*.cmd`, `service.json`;
+- detects the TS3 ServerQuery password, enables UID-verified registration and writes the welcome marker;
 - adds Windows Firewall rules;
 - registers startup tasks for LiveKit, control API and Caddy;
 - starts the services and checks `/api/health`;
@@ -121,7 +123,7 @@ For LAN/IP without TLS:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.2.1`.
+Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.0`.
 
 The stock TS3 server is installed separately; the installer only checks that it
 is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-windows.en.md).
@@ -129,9 +131,15 @@ is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-w
 ### Windows client
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.2.1.ts3_plugin` with the TeamSpeak Package Installer.
-3. Start TS3, connect to the server, press **Stream**.
-4. Create `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+2. Install `ts3stream-0.3.0.ts3_plugin` with the TeamSpeak Package Installer.
+3. Start TS3 and connect to the server.
+
+No manual config is normally needed: the plugin reads the `[ts3stream]...[/ts3stream]`
+marker from the TS3 welcome message, calls `/api/register`, verifies your TS3 UID
+through ServerQuery and saves `service.json` automatically.
+
+If auto-configuration is unavailable (no ServerQuery password was detected),
+create `%APPDATA%\TS3Client\plugins\ts3stream\service.json` manually:
 
 ```json
 {
@@ -140,7 +148,7 @@ is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-w
 }
 ```
 
-The installer prints the exact JSON with the generated key.
+Then press **Stream**.
 
 ## How it works
 
@@ -201,5 +209,6 @@ docs/     Linux/Windows installation, architecture, audio
 ## License
 
 MIT for the original code. TeamSpeak 3 SDK headers remain property of TeamSpeak Systems GmbH. LiveKit is Apache-2.0; Qt is LGPL-3.0. See [NOTICE](NOTICE).
+
 
 

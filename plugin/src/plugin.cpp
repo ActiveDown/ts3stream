@@ -62,6 +62,17 @@ void runQtDiagnostics() {
     ts3stream::diag::dumpWidgetTree(path + ".after-ui.txt");
 }
 
+void retryUiInitialization() {
+    if (!qApp || ts3stream::ui::StreamUi::instance().isInitialized()) {
+        return;
+    }
+    ts3stream::diag::log("StreamUi: retrying UI initialization");
+    ts3stream::ui::StreamUi::instance().initialize();
+    if (!ts3stream::ui::StreamUi::instance().isInitialized() && qApp) {
+        QTimer::singleShot(500, qApp, [] { retryUiInitialization(); });
+    }
+}
+
 void stopDiagnosticsTimer() {
     if (g_diagTimer) {
         g_diagTimer->stop();
@@ -84,6 +95,9 @@ void startDiagnosticsTimer() {
             return;
         }
         runQtDiagnostics();
+        if (!ts3stream::ui::StreamUi::instance().isInitialized()) {
+            QTimer::singleShot(500, qApp, [] { retryUiInitialization(); });
+        }
         g_running.store(false);
         if (g_diagTimer == timer) {
             g_diagTimer = nullptr;
@@ -169,7 +183,7 @@ const char* ts3plugin_name() {
 }
 
 const char* ts3plugin_version() {
-    return "0.2.1";
+    return "0.3.0";
 }
 
 int ts3plugin_apiVersion() {
@@ -201,7 +215,7 @@ int ts3plugin_init() {
         ts3stream::diag::log("plugin DLL pinned");
     }
 
-    ts3stream::diag::log("ts3plugin_init: TS3Stream 0.2.1");
+    ts3stream::diag::log("ts3plugin_init: TS3Stream 0.3.0");
     ts3stream::diag::log("init thread tid=%p", reinterpret_cast<void*>(QThread::currentThreadId()));
 
     g_running.store(true);

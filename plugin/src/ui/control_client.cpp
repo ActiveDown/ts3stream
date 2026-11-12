@@ -49,6 +49,7 @@ ControlConfig loadControlConfig() {
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return config;
     }
+    config.fromFile = true;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     const QJsonObject object = document.object();
     const QString url = object.value(QStringLiteral("controlUrl")).toString().trimmed();
@@ -57,6 +58,22 @@ ControlConfig loadControlConfig() {
     }
     config.clientKey = object.value(QStringLiteral("clientKey")).toString();
     return config;
+}
+
+bool saveControlConfig(const ControlConfig& config) {
+    QJsonObject object;
+    object.insert(QStringLiteral("controlUrl"), config.baseUrl);
+    object.insert(QStringLiteral("clientKey"), config.clientKey);
+    QFile file(configFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        diag::log("ControlClient: cannot write service.json");
+        return false;
+    }
+    file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    file.close();
+    diag::log("ControlClient: saved service.json controlUrl=%s",
+              config.baseUrl.toUtf8().constData());
+    return true;
 }
 
 ControlClient::ControlClient(const ControlConfig& config, QObject* parent)
@@ -129,6 +146,39 @@ void ControlClient::fetchStreams(const QString& room, StreamsCallback callback) 
             }
         }
         callback(true, streams, {});
+    });
+}
+
+void ControlClient::registerClient(const QString& uid, const QString& nickname,
+                                   const QString& serverUid, int channelId,
+                                   RegisterCallback callback) {
+    QJsonObject body;
+    body.insert(QStringLiteral("uid"), uid);
+    body.insert(QStringLiteral("nickname"), nickname);
+    body.insert(QStringLiteral("serverUid"), serverUid);
+    body.insert(QStringLiteral("channelId"), channelId);
+
+    const QUrl url(config_.baseUrl + QStringLiteral("/api/register"));
+    QNetworkReply* reply = network_->post(
+        makeRequest(config_, url), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QObject::connect(reply, &QNetworkReply::finished, this,
+                     [reply, callback = std::move(callback)] {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            callback(false, {}, replyError(reply));
+            return;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+        const QJsonObject object = document.object();
+        RegisteredConfig config;
+        config.controlUrl = object.value(QStringLiteral("controlUrl")).toString();
+        config.clientKey = object.value(QStringLiteral("clientKey")).toString();
+        config.livekitUrl = object.value(QStringLiteral("livekitUrl")).toString();
+        if (config.controlUrl.isEmpty() || config.clientKey.isEmpty()) {
+            callback(false, {}, QStringLiteral("register response is missing controlUrl/clientKey"));
+            return;
+        }
+        callback(true, config, {});
     });
 }
 

@@ -124,11 +124,21 @@ $env:TS3STREAM_CLIENT_KEY = "PASTE_CLIENT_KEY"
 $env:LIVEKIT_API_KEY = "ts3stream"
 $env:LIVEKIT_API_SECRET = "PASTE_SECRET"
 $env:LIVEKIT_URL = "ws://SERVER_IP:7880"
+$env:TS3STREAM_PUBLIC_URL = "http://SERVER_IP:8081"
+$env:TS3STREAM_WELCOME_AUTO = "1"
+$env:TS3_QUERY_ADDR = "127.0.0.1:10011"
+$env:TS3_QUERY_USER = "serveradmin"
+$env:TS3_QUERY_PASSWORD = "PASTE_QUERY_PASSWORD"
+$env:TS3_QUERY_SID = "1"
 .\ts3stream-control.exe
 ```
 
 `LIVEKIT_URL` is returned to every TS3 client, so it must be the address clients
 can actually reach. `127.0.0.1` only works when the client is on the same PC.
+
+The `TS3_QUERY_*` block enables UID-verified registration and the welcome marker.
+The installer detects the password from `C:\TS3Server\logs`; if it was not found,
+pass `-Ts3QueryPassword` or use a manual `service.json`.
 
 4. Check:
 
@@ -165,9 +175,15 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Install and configure the Windows client plugin
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.2.1.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.0.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to `SERVER_IP:9987`.
-4. Create `%APPDATA%\TS3Client\plugins\ts3stream\service.json`:
+
+Normally no manual file is needed. The plugin reads the welcome marker, calls
+`/api/register`, verifies the TS3 UID through ServerQuery and saves
+`service.json` automatically.
+
+If `TS3_QUERY_PASSWORD` was not configured, create
+`%APPDATA%\TS3Client\plugins\ts3stream\service.json` manually:
 
 ```json
 {
@@ -176,10 +192,9 @@ Test-NetConnection 127.0.0.1 -Port 7880
 }
 ```
 
-5. Restart TS3.
-6. Press **Stream**. The button is active only while connected.
-7. Watch a stream from the client context menu, the client info button, or the
-   LIVE badge. Starting your own stream does not open the viewer.
+Then restart TS3. Press **Stream**; the button is active only while connected.
+Watch a stream from the client context menu, the client info button, or the
+LIVE badge. Starting your own stream does not open the viewer.
 
 ## 8. Internet-facing TLS with Caddy (recommended for production)
 

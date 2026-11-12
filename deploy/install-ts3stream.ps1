@@ -24,6 +24,8 @@ param(
     [string]$ClientKey,
     [string]$Version,
     [string]$InstallDir = 'C:\TS3Stream',
+    [string]$Ts3Dir = 'C:\TS3Server',
+    [string]$Ts3QueryPassword,
     [switch]$NoTls,
     [switch]$SkipFirewall,
     [switch]$NoServices,
@@ -74,7 +76,7 @@ if (-not $NoTls -and $Domain -match '^\d{1,3}(\.\d{1,3}){3}$') {
     Fail 'Caddy/TLS needs a DNS name, not an IP. Use -NoTls for LAN/IP installation.'
 }
 if ([string]::IsNullOrWhiteSpace($ApiSecret)) { $ApiSecret = New-Secret 32 }
-if ([string]::IsNullOrWhiteSpace($ClientKey)) { $ClientKey = New-Secret 24 }
+if ([string]::IsNullOrWhiteSpace($ClientKey)) { $ClientKey = New-Secret 64 }
 
 Write-Step "Install directory: $InstallDir"
 Write-Step "TLS/Caddy: $(-not $NoTls)"
@@ -90,6 +92,28 @@ if (-not $Yes) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir, $LogDir | Out-Null
+
+# Auto-detect the ServerQuery password from the stock TS3 server logs.
+if ([string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
+    $logCandidates = @()
+    if (Test-Path (Join-Path $Ts3Dir 'logs')) {
+        $logCandidates += Get-ChildItem (Join-Path $Ts3Dir 'logs') -Filter '*.log' -ErrorAction SilentlyContinue
+    }
+    $logCandidates += Get-ChildItem $Ts3Dir -Filter '*.out' -ErrorAction SilentlyContinue
+    $logCandidates += Get-ChildItem $Ts3Dir -Filter '*.err' -ErrorAction SilentlyContinue
+    foreach ($log in $logCandidates) {
+        $match = Select-String -Path $log.FullName -Pattern 'password=\s*"([^"]+)"' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($match) {
+            $Ts3QueryPassword = $match.Matches[0].Groups[1].Value
+            Write-Step "Detected TS3 ServerQuery password in $($log.FullName)"
+            break
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
+    Write-Warn 'TS3 ServerQuery password not found. Auto-provisioning/UID verification will be disabled.'
+    Write-Warn "Pass -Ts3QueryPassword or ensure $Ts3Dir\logs contains the first-run server log."
+}
 
 function Download-File([string]$Url, [string]$Destination) {
     Write-Step "Downloading $Url"
@@ -172,6 +196,18 @@ cd /d "$InstallDir"
 "@
 Set-Content -Path (Join-Path $InstallDir 'start-livekit.cmd') -Value $startLiveKit -Encoding ASCII
 
+if (-not [string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
+    $queryEnv = @"
+set "TS3STREAM_WELCOME_AUTO=1"
+set "TS3_QUERY_ADDR=127.0.0.1:10011"
+set "TS3_QUERY_USER=serveradmin"
+set "TS3_QUERY_PASSWORD=$Ts3QueryPassword"
+set "TS3_QUERY_SID=1"
+"@
+} else {
+    $queryEnv = 'set "TS3STREAM_WELCOME_AUTO=0"'
+}
+
 $startControl = @"
 @echo off
 cd /d "$InstallDir"
@@ -180,6 +216,8 @@ set "TS3STREAM_CLIENT_KEY=$ClientKey"
 set "LIVEKIT_API_KEY=$ApiKey"
 set "LIVEKIT_API_SECRET=$ApiSecret"
 set "LIVEKIT_URL=$livekitUrl"
+set "TS3STREAM_PUBLIC_URL=$controlUrlPublic"
+$queryEnv
 "$InstallDir\ts3stream-control.exe" >> "$LogDir\control.log" 2>&1
 "@
 Set-Content -Path (Join-Path $InstallDir 'start-control.cmd') -Value $startControl -Encoding ASCII

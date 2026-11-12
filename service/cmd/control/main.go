@@ -4,10 +4,14 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +34,9 @@ type config struct {
 	apiSecret  string
 	livekitURL string
 	tokenTTL   time.Duration
+	publicURL  string
+	clientKey  string
+	query      ts3QueryConfig
 }
 
 type controlServer struct {
@@ -37,7 +44,23 @@ type controlServer struct {
 	apiSecret  string
 	livekitURL string
 	tokenTTL   time.Duration
+	publicURL  string
+	clientKey  string
+	query      ts3QueryConfig
 	registry   *streamRegistry
+}
+
+type registerRequest struct {
+	UID       string `json:"uid"`
+	Nickname  string `json:"nickname"`
+	ServerUID string `json:"serverUid"`
+	ChannelID uint64 `json:"channelId"`
+}
+
+type registerResponse struct {
+	ControlURL string `json:"controlUrl"`
+	ClientKey  string `json:"clientKey"`
+	LivekitURL string `json:"livekitUrl"`
 }
 
 type streamStartRequest struct {
@@ -66,6 +89,19 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("ignoring invalid %s value %q", key, value)
+		return fallback
+	}
+	return parsed
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -78,6 +114,9 @@ func newControlServer(cfg config) *controlServer {
 		apiSecret:  cfg.apiSecret,
 		livekitURL: cfg.livekitURL,
 		tokenTTL:   cfg.tokenTTL,
+		publicURL:  cfg.publicURL,
+		clientKey:  cfg.clientKey,
+		query:      cfg.query,
 		registry:   newStreamRegistry(streamTTL),
 	}
 }
@@ -90,6 +129,7 @@ func (s *controlServer) handler(clientKey string) http.Handler {
 	})
 
 	mux.HandleFunc("/api/token", s.handleToken)
+	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/streams/start", s.handleStreamStart)
 	mux.HandleFunc("/api/streams/heartbeat", s.handleStreamHeartbeat)
 	mux.HandleFunc("/api/streams/stop", s.handleStreamStop)
@@ -105,7 +145,7 @@ func requireClientKey(key string, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/health" {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/health" && r.URL.Path != "/api/register" {
 			supplied := r.Header.Get("X-TS3Stream-Key")
 			if subtle.ConstantTimeCompare([]byte(supplied), []byte(key)) != 1 {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -193,6 +233,113 @@ func (s *controlServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		URL:   s.livekitURL,
 		Room:  room,
 	})
+}
+
+func (s *controlServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req registerRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	uid := strings.TrimSpace(req.UID)
+	serverUID := strings.TrimSpace(req.ServerUID)
+	if uid == "" || serverUID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "uid and serverUid are required"})
+		return
+	}
+
+	if !s.query.configured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "TS3 query is not configured"})
+		return
+	}
+
+	client, err := newTS3QueryClient(s.query, defaultTS3QueryTimeout)
+	if err != nil {
+		log.Printf("register: TS3 query connect failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "TS3 query is unavailable"})
+		return
+	}
+	defer client.Close()
+
+	online, err := client.ClientOnline(uid)
+	if err != nil {
+		log.Printf("register: TS3 client lookup failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "TS3 query failed"})
+		return
+	}
+	if !online {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "client is not online on the TS3 server"})
+		return
+	}
+
+	// The server UID check is best-effort: older or restricted query logins
+	// may not be able to read serverinfo. The client UID check above is the
+	// authoritative registration check.
+	if actualUID, err := client.ServerUniqueID(); err != nil {
+		log.Printf("register: TS3 server UID lookup failed: %v", err)
+	} else if actualUID != "" && actualUID != serverUID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "server UID mismatch"})
+		return
+	}
+
+	log.Printf("register: verified client on TS3 server")
+	writeJSON(w, http.StatusOK, registerResponse{
+		ControlURL: s.publicURL,
+		ClientKey:  s.clientKey,
+		LivekitURL: s.livekitURL,
+	})
+}
+
+var welcomeMarkerPattern = regexp.MustCompile(`(?s)\[ts3stream\].*?\[/ts3stream\]`)
+
+// welcomeMessageWithMarker replaces any existing ts3stream marker and appends
+// the current public URL on its own line.
+func welcomeMessageWithMarker(current, publicURL string) string {
+	cleaned := welcomeMarkerPattern.ReplaceAllString(current, "")
+	cleaned = strings.TrimRight(cleaned, " \t\r\n")
+	marker := "[ts3stream]" + publicURL + "[/ts3stream]"
+	if cleaned == "" {
+		return marker
+	}
+	return cleaned + "\n" + marker
+}
+
+func configureWelcome(cfg ts3QueryConfig, publicURL string) error {
+	client, err := newTS3QueryClient(cfg, defaultTS3QueryTimeout)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	current, err := client.WelcomeMessage()
+	if err != nil {
+		return fmt.Errorf("read TS3 welcome message: %w", err)
+	}
+	updated := welcomeMessageWithMarker(current, publicURL)
+	if updated == current {
+		return nil
+	}
+	if err := client.SetWelcomeMessage(updated); err != nil {
+		return fmt.Errorf("set TS3 welcome message: %w", err)
+	}
+	return nil
+}
+
+func configureWelcomeWithRetry(cfg ts3QueryConfig, publicURL string, attempts int, delay time.Duration) error {
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err = configureWelcome(cfg, publicURL); err == nil {
+			return nil
+		}
+		if attempt < attempts {
+			time.Sleep(delay)
+		}
+	}
+	return err
 }
 
 func (s *controlServer) handleStreamStart(w http.ResponseWriter, r *http.Request) {
@@ -295,16 +442,32 @@ func main() {
 	addr := flag.String("addr", envOr("TS3STREAM_CONTROL_ADDR", "127.0.0.1:8081"), "HTTP listen address")
 	apiKey := flag.String("api-key", envOr("LIVEKIT_API_KEY", "devkey"), "LiveKit API key")
 	apiSecret := flag.String("api-secret", envOr("LIVEKIT_API_SECRET", "secret"), "LiveKit API secret")
-	publicURL := flag.String("livekit-url", envOr("LIVEKIT_URL", "ws://127.0.0.1:7880"), "LiveKit URL returned to clients")
+	livekitURL := flag.String("livekit-url", envOr("LIVEKIT_URL", "ws://127.0.0.1:7880"), "LiveKit URL returned to clients")
 	tokenTTL := flag.Duration("token-ttl", time.Hour, "token lifetime")
 	clientKey := flag.String("client-key", envOr("TS3STREAM_CLIENT_KEY", ""), "shared key required in X-TS3Stream-Key for /api endpoints (empty disables auth)")
+	controlPublicURL := flag.String("public-url", envOr("TS3STREAM_PUBLIC_URL", ""), "public base URL of the control API")
+	ts3QueryAddr := flag.String("ts3-query-addr", envOr("TS3_QUERY_ADDR", ""), "TeamSpeak 3 ServerQuery address, e.g. 127.0.0.1:10011 (empty disables query features)")
+	ts3QueryUser := flag.String("ts3-query-user", envOr("TS3_QUERY_USER", defaultTS3QueryUser), "TeamSpeak 3 ServerQuery login name")
+	ts3QueryPassword := flag.String("ts3-query-password", envOr("TS3_QUERY_PASSWORD", ""), "TeamSpeak 3 ServerQuery password")
+	ts3QuerySID := flag.String("ts3-query-sid", envOr("TS3_QUERY_SID", defaultTS3QuerySID), "TeamSpeak 3 virtual server ID for ServerQuery")
+	welcomeAuto := flag.Bool("welcome-auto", envBool("TS3STREAM_WELCOME_AUTO", false), "update the TS3 server welcome message with the public control URL on startup")
 	flag.Parse()
+
+	query := ts3QueryConfig{
+		addr:     strings.TrimSpace(*ts3QueryAddr),
+		user:     strings.TrimSpace(*ts3QueryUser),
+		password: *ts3QueryPassword,
+		sid:      strings.TrimSpace(*ts3QuerySID),
+	}
 
 	control := newControlServer(config{
 		apiKey:     *apiKey,
 		apiSecret:  *apiSecret,
-		livekitURL: *publicURL,
+		livekitURL: *livekitURL,
 		tokenTTL:   *tokenTTL,
+		publicURL:  strings.TrimRight(strings.TrimSpace(*controlPublicURL), "/"),
+		clientKey:  *clientKey,
+		query:      query,
 	})
 
 	server := &http.Server{
@@ -313,13 +476,35 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if *welcomeAuto {
+		switch {
+		case !query.configured():
+			log.Printf("welcome auto-configuration skipped: TS3 query address/password are not configured")
+		case control.publicURL == "":
+			log.Printf("welcome auto-configuration skipped: --public-url/TS3STREAM_PUBLIC_URL is not configured")
+		default:
+			go func() {
+				if err := configureWelcomeWithRetry(query, control.publicURL, 3, 2*time.Second); err != nil {
+					log.Printf("welcome auto-configuration failed: %v", err)
+					return
+				}
+				log.Printf("welcome auto-configuration updated the TS3 server welcome message")
+			}()
+		}
+	}
+
 	if *clientKey != "" {
 		log.Printf("client key authentication enabled")
 	} else {
 		log.Printf("client key authentication disabled")
 	}
-	log.Printf("ts3stream control listening on %s, LiveKit URL %s", *addr, *publicURL)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	log.Printf("ts3stream control listening on %s, LiveKit URL %s", *addr, *livekitURL)
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

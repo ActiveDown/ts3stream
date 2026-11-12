@@ -430,8 +430,97 @@ void StreamUi::installLiveBadgeDelegate() {
     diag::log("StreamUi: LIVE badge delegate installed");
 }
 
-void StreamUi::refreshLiveStreams() {
-    if (!initialized_ || !control_ || !connected_ || streamsRequestActive_) {
+void StreamUi::tryAutoConfigure() {
+    if (!initialized_ || !connected_ || !control_ || autoConfigDone_ || autoConfigInProgress_) {
+        return;
+    }
+    const ControlConfig& current = control_->config();
+    if (current.fromFile && !current.clientKey.isEmpty()) {
+        autoConfigDone_ = true;
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now < nextAutoConfigAttempt_ || autoConfigAttempts_ >= 30) {
+        return;
+    }
+    ++autoConfigAttempts_;
+
+    if (!ts3_.getCurrentServerConnectionHandlerID || !ts3_.getServerVariableAsString ||
+        !ts3_.freeMemory) {
+        return;
+    }
+    const uint64 scHandler = ts3_.getCurrentServerConnectionHandlerID();
+    if (scHandler == 0) {
+        return;
+    }
+
+    char* welcomeValue = nullptr;
+    if (ts3_.getServerVariableAsString(scHandler, VIRTUALSERVER_WELCOMEMESSAGE, &welcomeValue) != 0 ||
+        !welcomeValue) {
+        nextAutoConfigAttempt_ = now + std::chrono::seconds(1);
+        return;
+    }
+    const QString welcome = QString::fromUtf8(welcomeValue);
+    ts3_.freeMemory(welcomeValue);
+
+    const QString startTag = QStringLiteral("[ts3stream]");
+    const QString endTag = QStringLiteral("[/ts3stream]");
+    const int start = welcome.indexOf(startTag);
+    const int end = start >= 0 ? welcome.indexOf(endTag, start + startTag.size()) : -1;
+    if (start < 0 || end < 0) {
+        nextAutoConfigAttempt_ = now + std::chrono::seconds(1);
+        return;
+    }
+    QString url = welcome.mid(start + startTag.size(), end - start - startTag.size()).trimmed();
+    url = url.trimmed();
+    if (url.endsWith(QLatin1Char('/'))) {
+        url.chop(1);
+    }
+    if (!url.startsWith(QStringLiteral("http://")) && !url.startsWith(QStringLiteral("https://"))) {
+        diag::log("StreamUi: invalid TS3Stream welcome URL");
+        nextAutoConfigAttempt_ = now + std::chrono::seconds(5);
+        return;
+    }
+
+    QString room;
+    QString serverUid;
+    QString identity;
+    QString nickname;
+    int channelId = 0;
+    if (!roomContext(room, serverUid, channelId, identity, nickname)) {
+        nextAutoConfigAttempt_ = now + std::chrono::seconds(1);
+        return;
+    }
+
+    diag::log("StreamUi: auto-configuring from welcome URL %s", url.toUtf8().constData());
+    autoConfigInProgress_ = true;
+    auto discovery = std::make_shared<ControlClient>(ControlConfig{url, {}, false}, this);
+    discovery->registerClient(identity, nickname, serverUid, channelId,
+                              [this, discovery, url](bool ok, const RegisteredConfig& registered,
+                                                     const QString& error) {
+        autoConfigInProgress_ = false;
+        if (!initialized_) {
+            return;
+        }
+        if (!ok) {
+            diag::log("StreamUi: auto-configuration failed: %s", error.toUtf8().constData());
+            nextAutoConfigAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            return;
+        }
+        ControlConfig config;
+        config.baseUrl = registered.controlUrl.isEmpty() ? url : registered.controlUrl;
+        config.clientKey = registered.clientKey;
+        config.fromFile = true;
+        if (saveControlConfig(config)) {
+            control_ = std::make_unique<ControlClient>(config, this);
+            autoConfigDone_ = true;
+            diag::log("StreamUi: auto-configuration complete for %s",
+                      config.baseUrl.toUtf8().constData());
+        }
+    });
+}
+
+void StreamUi::refreshLiveStreams() {    if (!initialized_ || !control_ || !connected_ || streamsRequestActive_) {
         return;
     }
     QString room;
@@ -484,11 +573,17 @@ QWidget* StreamUi::findMainWindow() const {
         if (!widget || !widget->isWindow() || !widget->isVisible()) {
             continue;
         }
+        const qint64 area = static_cast<qint64>(widget->width()) * widget->height();
         const QString title = widget->windowTitle();
         if (title.contains("TeamSpeak", Qt::CaseInsensitive)) {
-            return widget;
+            // Pick the largest TS3-titled window: modal dialogs can also carry
+            // the client name and must not be mistaken for the main window.
+            if (!best || area > bestArea) {
+                bestArea = area;
+                best = widget;
+            }
+            continue;
         }
-        const qint64 area = static_cast<qint64>(widget->width()) * widget->height();
         if (area > bestArea) {
             bestArea = area;
             best = widget;
@@ -631,6 +726,7 @@ void StreamUi::initialize() {
             if (qEnvironmentVariableIsEmpty("TS3STREAM_DISABLE_GATE")) {
                 updateStreamButtonState();
             }
+            tryAutoConfigure();
             QWidget* current = findVisibleInfoFrame(mainWindow_);
             if (current && current != infoFrame_) {
                 diag::log("StreamUi: active InfoFrame changed, migrating");
@@ -863,21 +959,27 @@ void StreamUi::startFromPicker() {
 
 void StreamUi::updateStreamButtonState() {
     bool connected = false;
+    uint64 activeHandler = 0;
     if (ts3_.getCurrentServerConnectionHandlerID && ts3_.getConnectionStatus) {
-        const uint64 scHandler = ts3_.getCurrentServerConnectionHandlerID();
-        if (scHandler != 0) {
+        activeHandler = ts3_.getCurrentServerConnectionHandlerID();
+        if (activeHandler != 0) {
             int status = STATUS_DISCONNECTED;
-            if (ts3_.getConnectionStatus(scHandler, &status) == 0) {
+            if (ts3_.getConnectionStatus(activeHandler, &status) == 0) {
                 connected = status >= STATUS_CONNECTED;
             }
         }
     }
+
+    const bool configured = control_ &&
+                            (control_->config().fromFile || !control_->config().clientKey.isEmpty());
 
     if (streamButton_) {
         streamButton_->setEnabled(connected);
         streamButton_->setText(publishing_ ? QStringLiteral("Стрим ●") : QStringLiteral("Стрим"));
         if (publishing_) {
             streamButton_->setToolTip(QStringLiteral("Стрим идёт — открой меню, чтобы остановить"));
+        } else if (connected && !configured) {
+            streamButton_->setToolTip(QStringLiteral("TS3Stream: поиск сервера и ключа…"));
         } else if (connected) {
             streamButton_->setToolTip(QStringLiteral("TS3Stream — начать стрим экрана или приложения"));
         } else {
@@ -885,7 +987,7 @@ void StreamUi::updateStreamButtonState() {
         }
     }
     if (startAction_) {
-        startAction_->setEnabled(connected && !publishing_);
+        startAction_->setEnabled(connected && configured && !publishing_);
     }
     if (stopAction_) {
         stopAction_->setEnabled(publishing_);
@@ -904,6 +1006,19 @@ void StreamUi::updateStreamButtonState() {
     }
     if (connected != connected_) {
         diag::log("StreamUi: connection state changed connected=%d", connected ? 1 : 0);
+        if (connected) {
+            autoConfigAttempts_ = 0;
+            autoConfigDone_ = control_ && control_->config().fromFile;
+            autoConfigInProgress_ = false;
+            nextAutoConfigAttempt_ = std::chrono::steady_clock::now();
+            if (ts3_.requestServerVariables && activeHandler != 0) {
+                ts3_.requestServerVariables(activeHandler);
+            }
+        } else {
+            autoConfigAttempts_ = 0;
+            autoConfigInProgress_ = false;
+            autoConfigDone_ = false;
+        }
     }
     connected_ = connected;
 }
@@ -997,6 +1112,11 @@ void StreamUi::startViewerForStream(const ControlStream& stream) {
 void StreamUi::startViewerForRoom(const QString& room, const QString& targetIdentity, const QString& nickname) {
     if (!control_) {
         diag::log("StreamUi: viewer requested without control client");
+        return;
+    }
+    if (!control_->config().fromFile && control_->config().clientKey.isEmpty()) {
+        tryAutoConfigure();
+        diag::log("StreamUi: streaming server is not configured yet");
         return;
     }
 
@@ -1109,8 +1229,9 @@ void StreamUi::startCapture(const CaptureSource& source) {
         diag::log("StreamUi: stream already running, refusing a second one");
         return;
     }
-    if (!control_) {
-        diag::log("StreamUi: control client unavailable");
+    if (!control_ || (!control_->config().fromFile && control_->config().clientKey.isEmpty())) {
+        tryAutoConfigure();
+        diag::log("StreamUi: streaming server is not configured yet");
         return;
     }
 

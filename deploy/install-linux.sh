@@ -13,7 +13,7 @@
 #   sudo bash install-linux.sh
 #   sudo bash install-linux.sh --domain stream.example.com --yes
 #   sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy
-#   sudo bash install-linux.sh --domain stream.example.com --version v0.2.1
+#   sudo bash install-linux.sh --domain stream.example.com --version v0.3.0
 #
 set -euo pipefail
 
@@ -23,6 +23,8 @@ DOMAIN=""
 API_KEY="ts3stream"
 API_SECRET=""
 CLIENT_KEY=""
+TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD:-}"
+TS3_SERVER_DIR="${TS3_SERVER_DIR:-}"
 INSTALL_CADDY=1
 CONFIGURE_FIREWALL=1
 ASSUME_YES=0
@@ -40,7 +42,9 @@ Options:
   --api-key KEY          LiveKit API key (default: ts3stream)
   --api-secret SECRET    LiveKit API secret (default: generated)
   --client-key KEY       Shared key for the TS3 plugin (default: generated)
-  --version TAG          Control API release tag, e.g. v0.2.1 (default: latest)
+  --ts3-query-password P  ServerQuery password; auto-detected from TS3 logs by default
+  --ts3-dir DIR          TeamSpeak 3 server directory (default: /opt/ts3server)
+  --version TAG          Control API release tag, e.g. v0.3.0 (default: latest)
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
   --livekit-archive URL  Override the LiveKit Linux amd64 archive URL
@@ -75,6 +79,8 @@ parse_args() {
             --api-key) API_KEY="${2:-}"; shift 2 ;;
             --api-secret) API_SECRET="${2:-}"; shift 2 ;;
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
+            --ts3-query-password) TS3_QUERY_PASSWORD="${2:-}"; shift 2 ;;
+            --ts3-dir) TS3_SERVER_DIR="${2:-}"; shift 2 ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
@@ -126,7 +132,7 @@ ask_settings() {
         log "generated LiveKit API secret"
     fi
     if [[ -z "${CLIENT_KEY}" ]]; then
-        CLIENT_KEY="$(openssl rand -hex 24)"
+        CLIENT_KEY="$(openssl rand -hex 64)"
         log "generated client shared key"
     fi
 
@@ -171,8 +177,58 @@ create_users() {
     install -d -m 0755 /opt/ts3stream/bin /etc/ts3stream /var/log/ts3stream
 }
 
-stop_existing_services() {
-    # A running executable cannot be opened for write (ETXTBSY). Stop services
+detect_ts3_query() {
+    if [[ -n "${TS3_QUERY_PASSWORD}" ]]; then
+        log "using provided TS3 ServerQuery password"
+        return 0
+    fi
+    local dirs=("${TS3_SERVER_DIR}" /opt/ts3server /home/ts3/ts3server /opt/teamspeak3-server)
+    local dir line found
+    for dir in "${dirs[@]}"; do
+        [[ -n "$dir" && -d "$dir" ]] || continue
+        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$line" ]]; then
+            TS3_SERVER_DIR="$dir"
+            TS3_QUERY_PASSWORD="${line#*password= \"}"
+            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
+            log "detected TS3 ServerQuery password in $dir"
+            return 0
+        fi
+    done
+    # Fall back to systemd's WorkingDirectory or a shallow filesystem search.
+    found="$(systemctl show -p WorkingDirectory --value ts3server 2>/dev/null || true)"
+    if [[ -n "$found" && -d "$found" ]]; then
+        dirs+=("$found")
+    fi
+    found="$(find /opt /srv /home -maxdepth 4 -type f -name ts3server 2>/dev/null | head -n 1 || true)"
+    if [[ -n "$found" ]]; then
+        dirs+=("$(dirname "$found")")
+    fi
+    for dir in "${dirs[@]}"; do
+        [[ -n "$dir" && -d "$dir" ]] || continue
+        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out "$dir"/*.err 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$line" ]]; then
+            TS3_SERVER_DIR="$dir"
+            TS3_QUERY_PASSWORD="${line#*password= \"}"
+            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
+            log "detected TS3 ServerQuery password in $dir"
+            return 0
+        fi
+    done
+    if command -v journalctl >/dev/null 2>&1; then
+        line="$(journalctl -u ts3server -n 1000 --no-pager 2>/dev/null | grep -oE 'password= "[^"]+"' | head -n 1 || true)"
+        if [[ -n "$line" ]]; then
+            TS3_QUERY_PASSWORD="${line#*password= \"}"
+            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
+            log "detected TS3 ServerQuery password in journalctl"
+            return 0
+        fi
+    fi
+    warn "TS3 ServerQuery password was not found. Auto-provisioning and UID checks will be disabled; pass --ts3-query-password to enable them."
+    return 1
+}
+
+stop_existing_services() {    # A running executable cannot be opened for write (ETXTBSY). Stop services
     # and unmanaged processes before replacing binaries/config files.
     local unit
     for unit in ts3stream-control.service livekit.service caddy.service; do
@@ -251,9 +307,11 @@ EOF
 
     local control_addr="127.0.0.1:8081"
     local livekit_url="wss://${DOMAIN}"
+    local public_url="https://${DOMAIN}"
     if [[ "${INSTALL_CADDY}" -eq 0 ]]; then
         control_addr="0.0.0.0:8081"
         livekit_url="ws://${DOMAIN}:7880"
+        public_url="http://${DOMAIN}:8081"
     fi
 
     cat > /etc/ts3stream/control.env <<EOF
@@ -262,7 +320,20 @@ TS3STREAM_CLIENT_KEY=${CLIENT_KEY}
 LIVEKIT_API_KEY=${API_KEY}
 LIVEKIT_API_SECRET=${API_SECRET}
 LIVEKIT_URL=${livekit_url}
+TS3STREAM_PUBLIC_URL=${public_url}
 EOF
+
+    if [[ -n "${TS3_QUERY_PASSWORD}" ]]; then
+        cat >> /etc/ts3stream/control.env <<EOF
+TS3STREAM_WELCOME_AUTO=1
+TS3_QUERY_ADDR=127.0.0.1:10011
+TS3_QUERY_USER=serveradmin
+TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD}"
+TS3_QUERY_SID=1
+EOF
+    else
+        echo "TS3STREAM_WELCOME_AUTO=0" >> /etc/ts3stream/control.env
+    fi
     chown ts3stream:ts3stream /etc/ts3stream/control.env
     chmod 0640 /etc/ts3stream/control.env
 }
@@ -444,6 +515,9 @@ Services:
   systemctl status ts3stream-control
   $([[ ${INSTALL_CADDY} -eq 1 ]] && echo "systemctl status caddy")
 
+Auto-provisioning (Welcome + UID check):
+  $([[ -n "${TS3_QUERY_PASSWORD}" ]] && echo "enabled" || echo "disabled (no ServerQuery password)")
+
 Ports that must be reachable by clients:
   7881/tcp, 7882/udp
   $([[ ${INSTALL_CADDY} -eq 1 ]] && echo "443/tcp (Caddy / WSS / HTTPS)" || echo "8081/tcp, 7880/tcp (no TLS mode)")
@@ -462,6 +536,7 @@ main() {
     ask_settings
     install_packages
     create_users
+    detect_ts3_query || true
     stop_existing_services
     download_control
     download_livekit
@@ -476,4 +551,5 @@ main() {
 }
 
 main "$@"
+
 

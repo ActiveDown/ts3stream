@@ -40,6 +40,7 @@ public:
 
     void initialize();
     void shutdown();
+    bool isInitialized() const { return initialized_; }
 
     void setTs3Functions(const TS3Functions& functions);
     void onTalkStatusChanged(uint64 serverConnectionHandlerID, anyID clientID, bool talking);
@@ -72,6 +73,7 @@ private:
     void updateStreamButtonState();
     void installLiveBadgeDelegate();
     void refreshLiveStreams();
+    void tryAutoConfigure();
     void processVideoFrame(const std::shared_ptr<CaptureState>& state,
                            const media::CapturedVideoFrame& frame);
     void stopCapture(bool forShutdown = false);
@@ -153,6 +155,10 @@ private:
     int activeChannelId_ = 0;
     int captureGeneration_ = 0;
     int viewerGeneration_ = 0;
+    int autoConfigAttempts_ = 0;
+    bool autoConfigInProgress_ = false;
+    bool autoConfigDone_ = false;
+    std::chrono::steady_clock::time_point nextAutoConfigAttempt_{};
     bool streamsRequestActive_ = false;
 
     QPointer<QTreeView> treeView_;
