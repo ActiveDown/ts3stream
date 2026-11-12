@@ -183,7 +183,7 @@ const char* ts3plugin_name() {
 }
 
 const char* ts3plugin_version() {
-    return "0.3.10";
+    return "0.3.11";
 }
 
 int ts3plugin_apiVersion() {
@@ -215,7 +215,7 @@ int ts3plugin_init() {
         ts3stream::diag::log("plugin DLL pinned");
     }
 
-    ts3stream::diag::log("ts3plugin_init: TS3Stream 0.3.10");
+    ts3stream::diag::log("ts3plugin_init: TS3Stream 0.3.11");
     ts3stream::diag::log("init thread tid=%p", reinterpret_cast<void*>(QThread::currentThreadId()));
 
     g_running.store(true);

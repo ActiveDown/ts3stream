@@ -8,6 +8,7 @@ namespace ts3stream::ui {
 inline QSize videoResolutionBounds(int height) {
     switch (height) {
     case 720: return QSize(1280, 720);
+    case 900: return QSize(1600, 900);
     case 1440: return QSize(2560, 1440);
     default: return QSize(1920, 1080);
     }

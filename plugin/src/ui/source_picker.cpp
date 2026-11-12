@@ -1,4 +1,5 @@
 #include "source_picker.h"
+#include "stream_preferences.h"
 
 #include "../media/window_enumerator.h"
 
@@ -13,10 +14,11 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
-#include <QSpinBox>
+#include <QRegularExpressionValidator>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -53,7 +55,7 @@ public:
             "QListWidget { background: #232323; color: #e0e0e0; border: none; }"
             "QListWidget::item { padding: 6px; }"
             "QListWidget::item:selected { background: #3d5a80; }"
-            "QComboBox, QSpinBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #4a4a4a; padding: 3px 6px; }"
+            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #4a4a4a; padding: 3px 6px; }"
             "QComboBox QAbstractItemView { background: #232323; color: #e0e0e0; selection-background-color: #3d5a80; }"
             "QPushButton { background: #333333; color: #e0e0e0; border: 1px solid #4a4a4a;"
             "  padding: 5px 14px; border-radius: 3px; }"
@@ -76,9 +78,9 @@ public:
         resolution_ = new QComboBox(qualityGroup);
         resolution_->setObjectName(QStringLiteral("ts3stream_resolution"));
         resolution_->addItem(QStringLiteral("720p — 1280×720"), 720);
+        resolution_->addItem(QStringLiteral("900p — 1600×900"), 900);
         resolution_->addItem(QStringLiteral("1080p — 1920×1080"), 1080);
         resolution_->addItem(QStringLiteral("1440p — 2560×1440"), 1440);
-        resolution_->setCurrentIndex(1);
         resolution_->setToolTip(QStringLiteral("Максимальный размер кадра. Пропорции сохраняются, маленькие окна не увеличиваются."));
         qualityLayout->addRow(QStringLiteral("Разрешение:"), resolution_);
         fps_ = new QComboBox(qualityGroup);
@@ -120,17 +122,30 @@ public:
         root->addWidget(audioGroup);
 
         auto* bitrateLayout = new QFormLayout();
-        bitrate_ = new QSpinBox(this);
+        bitrate_ = new QComboBox(this);
         bitrate_->setObjectName(QStringLiteral("ts3stream_bitrate"));
-        bitrate_->setRange(media::kMinVideoBitrateKbps, media::kMaxVideoBitrateKbps);
-        bitrate_->setSingleStep(1000);
-        bitrate_->setValue(media::kDefaultVideoBitrateKbps);
-        bitrate_->setSuffix(QStringLiteral(" Кбит/с"));
+        bitrate_->setEditable(true);
+        bitrate_->setInsertPolicy(QComboBox::NoInsert);
+        for (int value = media::kMinVideoBitrateKbps; value <= media::kMaxVideoBitrateKbps; value += 1000) {
+            bitrate_->addItem(QString::number(value));
+        }
+        bitrate_->setValidator(new QRegularExpressionValidator(
+            QRegularExpression(QStringLiteral("(?:[1-9][0-9]{3}|10000)")), bitrate_));
         bitrate_->setToolTip(QStringLiteral(
-            "Верхний предел видеобитрейта. При ухудшении связи скорость снижается автоматически. "
-            "Применяется при запуске этого стрима."));
-        bitrateLayout->addRow(QStringLiteral("Битрейт видео:"), bitrate_);
+            "1000–10000 Кбит/с: выберите из списка или введите своё значение. "
+            "При ухудшении связи скорость снижается автоматически. "
+            "Битрейт, разрешение и FPS сохраняются после запуска стрима."));
+        bitrateLayout->addRow(QStringLiteral("Битрейт видео (Кбит/с):"), bitrate_);
         root->addLayout(bitrateLayout);
+
+        CaptureSource preferences;
+        loadStreamPreferences(preferences);
+        resolution_->setCurrentIndex(resolution_->findData(preferences.resolutionHeight));
+        fps_->setCurrentIndex(preferences.autoFps ? 2 : preferences.fps == 60 ? 1 : 0);
+        const QString bitrateText = QString::number(preferences.videoBitrateKbps);
+        const int bitrateIndex = bitrate_->findText(bitrateText);
+        bitrate_->setCurrentIndex(bitrateIndex);
+        if (bitrateIndex < 0) bitrate_->setEditText(bitrateText);
 
         auto* bottom = new QHBoxLayout();
         auto* refresh = new QPushButton(QStringLiteral("Обновить"), this);
@@ -141,6 +156,10 @@ public:
         bottom->addStretch(1);
         bottom->addWidget(buttons);
         root->addLayout(bottom);
+
+        connect(bitrate_, &QComboBox::editTextChanged, this, [this, buttons] {
+            buttons->button(QDialogButtonBox::Ok)->setEnabled(bitrate_->lineEdit()->hasAcceptableInput());
+        });
 
         connect(refresh, &QPushButton::clicked, this, [this] { reload(); });
         connect(tabs_, &QTabWidget::currentChanged, this, [this] { updateDefaults(); });
@@ -167,6 +186,7 @@ public:
     }
 
     std::optional<CaptureSource> selected() const {
+        if (!bitrate_->lineEdit()->hasAcceptableInput()) return std::nullopt;
         CaptureSource source;
         if (tabs_->currentWidget() == screens_) {
             const auto* item = screens_->currentItem();
@@ -214,7 +234,7 @@ public:
 
         source.autoFps = fps_->currentIndex() == 2;
         source.resolutionHeight = resolution_->currentData().toInt();
-        source.videoBitrateKbps = bitrate_->value();
+        source.videoBitrateKbps = bitrate_->currentText().toInt();
         source.fps = source.autoFps ? 60 : fps_->currentData().toInt();
         if (source.fps <= 0) {
             source.fps = 30;
@@ -278,7 +298,7 @@ private:
     QRadioButton* audioNone_ = nullptr;
     QComboBox* fps_ = nullptr;
     QComboBox* resolution_ = nullptr;
-    QSpinBox* bitrate_ = nullptr;
+    QComboBox* bitrate_ = nullptr;
 
     std::vector<media::MonitorInfo> monitors_;
     std::vector<media::WindowInfo> windowsList_;

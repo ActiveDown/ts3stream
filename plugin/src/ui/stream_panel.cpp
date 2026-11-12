@@ -177,7 +177,7 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
     volumeSlider_->setRange(0, media::kMaxPlaybackVolumePercent);
     volumeSlider_->setValue(100);
     volumeSlider_->setFixedWidth(120);
-    volumeSlider_->setToolTip(QStringLiteral("Громкость стрима: до 125% (не влияет на голоса TeamSpeak)"));
+    volumeSlider_->setToolTip(QStringLiteral("Громкость стрима: до 150% (не влияет на голоса TeamSpeak)"));
     volumeSlider_->setAccessibleName(QStringLiteral("Громкость стрима"));
     volumeLabel_ = new QLabel(QStringLiteral("100%"), audioControls_);
     volumeLabel_->setMinimumWidth(38);

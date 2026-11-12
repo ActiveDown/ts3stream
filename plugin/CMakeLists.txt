@@ -30,6 +30,7 @@ add_library(ts3stream_diag SHARED
     src/ui/live_stream_menu.cpp
     src/ui/active_streams_button.cpp
     src/ui/source_picker.cpp
+    src/ui/stream_preferences.cpp
     src/ui/frame_processor.cpp
     src/ui/control_client.cpp
     src/ui/stream_ui.cpp
@@ -118,7 +119,7 @@ if (TS3STREAM_BUILD_UI_TESTS)
         target_compile_options(desktop_capture_test PRIVATE /utf-8 /W4 /permissive- /Zc:__cplusplus)
         target_compile_options(viewer_autohide_test PRIVATE /utf-8)
     endif()
-    add_executable(source_picker_test tests/source_picker_test.cpp src/ui/source_picker.cpp)
+    add_executable(source_picker_test tests/source_picker_test.cpp src/ui/source_picker.cpp src/ui/stream_preferences.cpp)
     target_include_directories(source_picker_test PRIVATE src)
     target_link_libraries(source_picker_test PRIVATE Qt5::Widgets)
     target_compile_definitions(source_picker_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

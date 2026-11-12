@@ -1,6 +1,6 @@
 # Viewer regression tests
 
-`source_picker_test.exe` uses deterministic monitor/window fixtures to exercise all three resolution and FPS selections in the real picker, its 1080p default and cancellation. It checks the production scaling helper on 4K, portrait, ultrawide, small and odd-sized frames (aspect ratio, resolution limits and no upscaling). No capture or server connection is started.
+`source_picker_test.exe` uses deterministic monitor/window fixtures to exercise all four resolutions (including 1600×900), all three FPS modes, and an editable bitrate dropdown in the real picker. It checks scaling of 4K, portrait, ultrawide, small and odd-sized frames, no upscaling, input validation and cancellation. An isolated temporary profile verifies immediate JSON writes, restoration in fresh processes (including distinct 60/Auto and custom bitrate), corrupt/invalid field fallback, cancelled selections leaving the file untouched, and write failure reporting. No real configuration, capture or server connection is used.
 
 Configure the plugin with `-DTS3STREAM_BUILD_UI_TESTS=ON` using the same MSVC/Qt toolchain as the plugin, then build. Put Qt's `bin` directory on `PATH`.
 
@@ -24,7 +24,7 @@ For `capture_wan_test`, set `QT_MULTIMEDIA_PREFERRED_PLUGINS=windowsmediafoundat
 
 `live_stream_menu_test.exe` replaces the entire stream registry while a LIVE popup is open and verifies that its selection still holds the original stream data.
 
-`viewer_controls_test.exe` checks software PCM gain through 125% (including saturation at both signed limits without overflow), 0–125% slider/label/callbacks, the unchanged 100% default, boost preservation across mute/fullscreen, fullscreen controls with the members bar hidden, toolbar stream counts/menu snapshots, and LIVE badge geometry in a narrowed/scrolled viewport.
+`viewer_controls_test.exe` checks software PCM gain through 150% (including saturation at both signed limits without overflow), 0–150% slider/label/callbacks, the unchanged 100% default, boost preservation across mute/fullscreen, fullscreen controls with the members bar hidden, toolbar stream counts/menu snapshots, and LIVE badge geometry in a narrowed/scrolled viewport.
 
 `desktop_frame_test.exe` is deterministic and does not capture the desktop. It checks all four DXGI rotations, row padding, color/alpha/masked/monochrome pointers, hotspot semantics, clipping and incomplete pointer data.
 
@@ -32,7 +32,7 @@ For `capture_wan_test`, set `QT_MULTIMEDIA_PREFERRED_PLUGINS=windowsmediafoundat
 
 `rtc_diagnostics_test.exe` verifies interval bitrate/FPS, encode/decode and packet/jitter-buffer delay, loss/freeze deltas, single-PC duplicate suppression, counter reset, idle intervals and disappearing/reappearing tracks. No server is required.
 
-`video_bitrate_test.exe` checks the 4000 Kbit/s default, 1000–10000 Kbit/s selections, conversion to bits/s and explicit client choice taking precedence over the legacy diagnostic environment variable. `source_picker_test.exe` also checks numeric entry, +/-1000 steps, bounds and cancellation for the bitrate field. To verify SDK publication, pass `selectedBitrateKbps` to `capture_wan_test` while setting a different `TS3STREAM_MAX_BITRATE`; the publisher log must show the explicit selection in `maxBitrate`, not the environment override.
+`video_bitrate_test.exe` checks the 4000 Kbit/s default, 1000–10000 Kbit/s selections, conversion to bits/s and explicit client choice taking precedence over the legacy diagnostic environment variable. `source_picker_test.exe` also checks numeric entry, 1000-spaced dropdown choices, bounds and cancellation for the bitrate field. To verify SDK publication, pass `selectedBitrateKbps` to `capture_wan_test` while setting a different `TS3STREAM_MAX_BITRATE`; the publisher log must show the explicit selection in `maxBitrate`, not the environment override.
 
 `delayed_audio_test.exe` checks the room metadata contract, no early output, copied PCM/order, bounded memory under overload, pause/reset/restart and interruptible shutdown without playing the queued tail. No audio device or server is used.
 

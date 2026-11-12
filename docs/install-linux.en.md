@@ -156,7 +156,7 @@ Use the TS3Stream LiveKit build from the matching release for server-side buffer
 ```bash
 cd /tmp
 curl -fL -o livekit-server \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.10/ts3stream-livekit-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.11/ts3stream-livekit-linux-amd64
 sudo install -m 0755 livekit-server /opt/ts3stream/bin/livekit-server
 ```
 
@@ -225,7 +225,7 @@ Download `ts3stream-control-linux-amd64` from the TS3Stream release page:
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.10/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.11/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -353,7 +353,7 @@ Do **not** expose `7880` or `8081` directly; Caddy proxies them on localhost.
 
 ## 7. Install and configure the Windows client
 
-1. Install `ts3stream-0.3.10.ts3_plugin` with the TeamSpeak Package Installer.
+1. Install `ts3stream-0.3.11.ts3_plugin` with the TeamSpeak Package Installer.
 2. Start TS3, connect to your server.
 
 Normally no manual file is needed. The plugin reads the

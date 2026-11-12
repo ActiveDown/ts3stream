@@ -6,7 +6,7 @@
 
 namespace ts3stream::media {
 
-inline constexpr int kMaxPlaybackVolumePercent = 125;
+inline constexpr int kMaxPlaybackVolumePercent = 150;
 
 // Software gain on received PCM only; never change the shared Windows/TS3 mixer.
 inline int16_t applyPlaybackGain(int16_t sample, int percent) {

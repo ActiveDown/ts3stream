@@ -4,6 +4,7 @@
 #include "fullscreen_window.h"
 #include "live_stream_menu.h"
 #include "video_quality.h"
+#include "stream_preferences.h"
 #include "active_streams_button.h"
 #include "../diag/widget_dump.h"
 #include "../log.h"
@@ -1491,6 +1492,10 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
         diag::log("StreamUi: capture start failed: %s", captureError.c_str());
         stopCapture();
         return;
+    }
+
+    if (!saveStreamPreferences(source)) {
+        diag::log("StreamUi: cannot save stream-settings.json");
     }
 
     if (control_) {
