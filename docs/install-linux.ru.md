@@ -30,6 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/in
 control API и Caddy, создаст systemd-службы, сгенерирует секреты, добавит
 правила UFW и выведет готовый `service.json` для Windows-клиентов.
 
+Если пароль ServerQuery не найден в логах TS3, установщик спросит его и
+предложит автоматический сброс (TS3-сервер будет перезапущен). Для
+неинтерактивной установки используйте `--ts3-query-password '...'` или
+`--reset-ts3-query`.
+
 Неинтерактивные примеры:
 
 ```bash

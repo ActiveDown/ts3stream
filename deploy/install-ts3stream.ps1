@@ -112,6 +112,15 @@ if ([string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
 }
 if ([string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
     Write-Warn 'TS3 ServerQuery password not found. Auto-provisioning/UID verification will be disabled.'
+    if (-not $Yes) {
+        $entered = Read-Host 'Enter the current ServerQuery password (leave empty to skip auto-provisioning)'
+        if (-not [string]::IsNullOrWhiteSpace($entered)) {
+            $Ts3QueryPassword = $entered
+            Write-Step 'Using the entered ServerQuery password'
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($Ts3QueryPassword)) {
     Write-Warn "Pass -Ts3QueryPassword or ensure $Ts3Dir\logs contains the first-run server log."
 }
 

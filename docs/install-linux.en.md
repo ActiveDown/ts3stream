@@ -30,6 +30,11 @@ The installer asks for the public DNS name and confirmation, then installs
 LiveKit, the control API and Caddy, creates systemd services, generates secrets,
 adds UFW rules and prints the exact `service.json` for Windows clients.
 
+If the ServerQuery password is not found in the TS3 logs, the installer asks
+for it and offers an automatic reset (the TS3 server is restarted). For
+non-interactive installs use `--ts3-query-password '...'` or
+`--reset-ts3-query`.
+
 Non-interactive examples:
 
 ```bash

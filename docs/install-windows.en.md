@@ -19,7 +19,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 It installs LiveKit, the control API and optionally Caddy with TLS, writes all
 configuration, adds firewall rules, creates startup tasks and checks the control
 API health endpoint. The stock TS3 server is **not** installed or modified; the
-installer only checks that it is running.
+installer only checks that it is running. If the ServerQuery password is not
+found in `C:\TS3Server\logs`, it asks for it; leave it empty to skip
+auto-provisioning.
 
 LAN/IP without TLS:
 

@@ -51,6 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/in
 - создаст systemd-службы `livekit` и `ts3stream`;
 - сгенерирует секрет LiveKit API и общий ключ клиента;
 - найдёт пароль TS3 ServerQuery, включит UID-проверку и запишет маркер TS3Stream в welcome message сервера;
+- если пароль не найден — спросит его и предложит автоматический сброс (с перезапуском TS3);
 - добавит правила UFW для портов стриминга;
 - выведет `service.json` как ручной fallback.
 

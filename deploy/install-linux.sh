@@ -25,6 +25,7 @@ API_SECRET=""
 CLIENT_KEY=""
 TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD:-}"
 TS3_SERVER_DIR="${TS3_SERVER_DIR:-}"
+RESET_TS3_QUERY=0
 INSTALL_CADDY=1
 CONFIGURE_FIREWALL=1
 ASSUME_YES=0
@@ -43,8 +44,9 @@ Options:
   --api-secret SECRET    LiveKit API secret (default: generated)
   --client-key KEY       Shared key for the TS3 plugin (default: generated)
   --ts3-query-password P  ServerQuery password; auto-detected from TS3 logs by default
-  --ts3-dir DIR          TeamSpeak 3 server directory (default: /opt/ts3server)
-  --version TAG          Control API release tag, e.g. v0.3.0 (default: latest)
+  --ts3-dir DIR          TeamSpeak 3 server directory (default: auto-detect)
+  --reset-ts3-query      If the password is unknown, reset it automatically (server restart)
+  --version TAG          Control API release tag, e.g. v0.3.1 (default: latest)
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
   --livekit-archive URL  Override the LiveKit Linux amd64 archive URL
@@ -81,6 +83,7 @@ parse_args() {
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
             --ts3-query-password) TS3_QUERY_PASSWORD="${2:-}"; shift 2 ;;
             --ts3-dir) TS3_SERVER_DIR="${2:-}"; shift 2 ;;
+            --reset-ts3-query) RESET_TS3_QUERY=1; shift ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
@@ -177,6 +180,58 @@ create_users() {
     install -d -m 0755 /opt/ts3stream/bin /etc/ts3stream /var/log/ts3stream
 }
 
+find_ts3_service() {
+    systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null \
+        | awk '{print $1}' | grep -Ei '(^|[-_])(ts3server|teamspeak).*\.service$' | head -n 1 || true
+}
+
+reset_ts3_query_password() {
+    local service dir user newpass output
+    service="$(find_ts3_service)"
+    if [[ -z "$service" ]]; then
+        warn "cannot reset ServerQuery password: ts3server systemd service not found"
+        return 1
+    fi
+    dir="$TS3_SERVER_DIR"
+    if [[ -z "$dir" ]]; then
+        dir="$(systemctl show -p WorkingDirectory --value "$service" 2>/dev/null || true)"
+    fi
+    if [[ -z "$dir" || ! -x "$dir/ts3server" ]]; then
+        warn "cannot reset ServerQuery password: ts3server binary not found (use --ts3-dir)"
+        return 1
+    fi
+    user="$(systemctl show -p User --value "$service" 2>/dev/null || true)"
+    [[ -n "$user" ]] || user=root
+    newpass="$(openssl rand -hex 24)"
+    output="$(mktemp)"
+
+    log "stopping $service to reset the ServerQuery password"
+    systemctl stop "$service" >/dev/null 2>&1 || true
+    if [[ "$user" == "root" ]]; then
+        timeout 20 "$dir/ts3server" serveradmin_password="$newpass" license_accepted=1 >"$output" 2>&1 || true
+    elif command -v runuser >/dev/null 2>&1; then
+        timeout 20 runuser -u "$user" -- "$dir/ts3server" serveradmin_password="$newpass" license_accepted=1 >"$output" 2>&1 || true
+    else
+        warn "runuser not found; cannot reset as user $user"
+        rm -f "$output"
+        systemctl start "$service" >/dev/null 2>&1 || true
+        return 1
+    fi
+    systemctl start "$service" >/dev/null 2>&1 || true
+
+    if grep -qiE 'invalid|error|failed|cannot' "$output"; then
+        warn "ServerQuery reset output contains errors:"
+        tail -n 10 "$output" >&2 || true
+        rm -f "$output"
+        return 1
+    fi
+    rm -f "$output"
+    TS3_QUERY_PASSWORD="$newpass"
+    TS3_SERVER_DIR="$dir"
+    log "ServerQuery password reset; the new password is stored in control.env"
+    return 0
+}
+
 detect_ts3_query() {
     if [[ -n "${TS3_QUERY_PASSWORD}" ]]; then
         log "using provided TS3 ServerQuery password"
@@ -224,11 +279,32 @@ detect_ts3_query() {
             return 0
         fi
     fi
-    warn "TS3 ServerQuery password was not found. Auto-provisioning and UID checks will be disabled; pass --ts3-query-password to enable them."
+    if [[ "${RESET_TS3_QUERY}" -eq 1 ]]; then
+        reset_ts3_query_password && return 0
+        return 1
+    fi
+    if [[ -t 0 ]]; then
+        echo
+        echo "TS3 ServerQuery password was not found in the logs."
+        echo "It is printed only once when the TS3 server is first created."
+        read -r -s -p "Enter the current ServerQuery password (empty = reset it): " queryAnswer
+        echo
+        if [[ -n "${queryAnswer}" ]]; then
+            TS3_QUERY_PASSWORD="${queryAnswer}"
+            return 0
+        fi
+        read -r -p "Reset the ServerQuery password automatically? The TS3 server will be restarted. [Y/n] " resetAnswer
+        case "${resetAnswer}" in
+            n|N|no|NO) warn "ServerQuery auto-provisioning disabled"; return 1 ;;
+            *) reset_ts3_query_password && return 0 || return 1 ;;
+        esac
+    fi
+    warn "TS3 ServerQuery password was not found. Auto-provisioning and UID checks will be disabled; pass --ts3-query-password or --reset-ts3-query to enable them."
     return 1
 }
 
-stop_existing_services() {    # A running executable cannot be opened for write (ETXTBSY). Stop services
+stop_existing_services() {
+    # A running executable cannot be opened for write (ETXTBSY). Stop services
     # and unmanaged processes before replacing binaries/config files.
     local unit
     for unit in ts3stream-control.service livekit.service caddy.service; do

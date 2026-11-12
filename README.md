@@ -51,6 +51,7 @@ The installer prompts for the domain and confirmation, then:
 - creates `livekit` and `ts3stream` systemd services;
 - generates the LiveKit API secret and the client shared key;
 - detects the TS3 ServerQuery password, enables UID-verified registration and writes the TS3Stream marker into the server welcome message;
+- if the password is not found, asks for it and offers an automatic reset (with a TS3 restart);
 - adds UFW rules for the streaming ports;
 - prints a ready `service.json` as a manual fallback.
 
