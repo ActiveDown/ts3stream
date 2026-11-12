@@ -300,7 +300,16 @@ sudo certbot certonly --standalone -d turn.example.com
 sudo systemctl start caddy
 ```
 
-3. Добавьте в `/etc/ts3stream/livekit.yaml`:
+3. Скопируйте сертификат туда, где пользователь LiveKit сможет его прочитать,
+   и добавьте TURN в `/etc/ts3stream/livekit.yaml`:
+
+```bash
+sudo mkdir -p /etc/ts3stream/certs
+sudo cp /etc/letsencrypt/live/turn.example.com/fullchain.pem /etc/ts3stream/certs/
+sudo cp /etc/letsencrypt/live/turn.example.com/privkey.pem /etc/ts3stream/certs/
+sudo chown -R livekit:livekit /etc/ts3stream/certs
+sudo chmod 640 /etc/ts3stream/certs/*
+```
 
 ```yaml
 turn:
@@ -308,8 +317,8 @@ turn:
   domain: turn.example.com
   tls_port: 5349
   udp_port: 3478
-  cert_file: /etc/letsencrypt/live/turn.example.com/fullchain.pem
-  key_file: /etc/letsencrypt/live/turn.example.com/privkey.pem
+  cert_file: /etc/ts3stream/certs/fullchain.pem
+  key_file: /etc/ts3stream/certs/privkey.pem
 ```
 
 4. Перезапустите LiveKit:
@@ -319,6 +328,10 @@ sudo systemctl restart livekit
 ```
 
 5. Откройте `3478/udp` и `5349/tcp`.
+
+6. После обновления сертификата скопируйте новые `fullchain.pem` и
+   `privkey.pem` в `/etc/ts3stream/certs/` и перезапустите LiveKit. Это можно
+   автоматизировать deploy-hook'ом certbot.
 
 ## 9. Проверка
 
