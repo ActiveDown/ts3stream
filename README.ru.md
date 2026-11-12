@@ -1,4 +1,4 @@
-﻿# TS3Stream
+# TS3Stream
 
 Стриминг экрана и приложений внутри **стокового TeamSpeak 3** на Windows в стиле Discord. LiveKit работает рядом с немодифицированным TS3-сервером.
 
@@ -65,7 +65,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Полезные опции: `--version v0.3.1` — зафиксировать релиз control API, `--no-firewall`, `--help`.
+Полезные опции: `--version v0.3.2` — зафиксировать релиз control API, `--no-firewall`, `--help`.
 
 Если есть только публичный IP и нет домена:
 
@@ -124,7 +124,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.1`.
+Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.2`.
 
 Стоковый TS3-сервер ставится отдельно; установщик только проверяет, что он
 запущен. Подробная ручная инструкция: [`docs/install-windows.ru.md`](docs/install-windows.ru.md).
@@ -132,7 +132,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 ### Windows-клиент
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.3.1.ts3_plugin` через TeamSpeak Package Installer.
+2. Установите `ts3stream-0.3.2.ts3_plugin` через TeamSpeak Package Installer.
 3. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно: плагин читает маркер `[ts3stream]...[/ts3stream]`

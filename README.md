@@ -1,4 +1,4 @@
-﻿# TS3Stream
+# TS3Stream
 
 Discord-style screen and application streaming inside **stock TeamSpeak 3** on Windows, with LiveKit running next to the untouched TS3 server.
 
@@ -65,7 +65,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Useful options: `--version v0.3.1` to pin the control API release, `--no-firewall`, `--help`.
+Useful options: `--version v0.3.2` to pin the control API release, `--no-firewall`, `--help`.
 
 If you only have a public IP and no domain:
 
@@ -124,7 +124,7 @@ For LAN/IP without TLS:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.1`.
+Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.2`.
 
 The stock TS3 server is installed separately; the installer only checks that it
 is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-windows.en.md).
@@ -132,7 +132,7 @@ is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-w
 ### Windows client
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.1.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.2.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to the server.
 
 No manual config is normally needed: the plugin reads the `[ts3stream]...[/ts3stream]`

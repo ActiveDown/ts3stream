@@ -1,4 +1,4 @@
-﻿# Installing TS3Stream on a Linux server
+# Installing TS3Stream on a Linux server
 
 This guide installs a complete server stack on Ubuntu 22.04/24.04:
 
@@ -228,7 +228,7 @@ Download `ts3stream-control-linux-amd64` from the TS3Stream release page:
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.1/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.2/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -353,7 +353,7 @@ Do **not** expose `7880` or `8081` directly; Caddy proxies them on localhost.
 
 ## 7. Install and configure the Windows client
 
-1. Install `ts3stream-0.3.1.ts3_plugin` with the TeamSpeak Package Installer.
+1. Install `ts3stream-0.3.2.ts3_plugin` with the TeamSpeak Package Installer.
 2. Start TS3, connect to your server.
 
 Normally no manual file is needed. The plugin reads the

@@ -1,4 +1,4 @@
-﻿# Installing TS3Stream on a Windows server
+# Installing TS3Stream on a Windows server
 
 This guide is for a Windows machine that runs the TeamSpeak 3 server and the
 TS3Stream server components. There are two common setups:
@@ -177,7 +177,7 @@ Test-NetConnection 127.0.0.1 -Port 7880
 ## 7. Install and configure the Windows client plugin
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.1.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.2.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to `SERVER_IP:9987`.
 
 Normally no manual file is needed. The plugin reads the welcome marker, calls

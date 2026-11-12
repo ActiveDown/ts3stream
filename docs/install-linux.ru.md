@@ -1,4 +1,4 @@
-﻿# Установка TS3Stream на Linux-сервер
+# Установка TS3Stream на Linux-сервер
 
 Инструкция для Ubuntu 22.04/24.04. Ставим полный стек:
 
@@ -228,7 +228,7 @@ sudo systemctl enable --now livekit
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.1/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.2/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -353,7 +353,7 @@ sudo ufw enable
 
 ## 7. Установка и настройка Windows-клиента
 
-1. Установите `ts3stream-0.3.1.ts3_plugin` через TeamSpeak Package Installer.
+1. Установите `ts3stream-0.3.2.ts3_plugin` через TeamSpeak Package Installer.
 2. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно. Плагин читает маркер
