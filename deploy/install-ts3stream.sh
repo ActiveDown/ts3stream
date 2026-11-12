@@ -171,6 +171,19 @@ create_users() {
     install -d -m 0755 /opt/ts3stream/bin /etc/ts3stream /var/log/ts3stream
 }
 
+stop_existing_services() {
+    # A running executable cannot be opened for write (ETXTBSY). Stop services
+    # and unmanaged processes before replacing binaries/config files.
+    local unit
+    for unit in ts3stream-control.service livekit.service caddy.service; do
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+    done
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -f '/opt/ts3stream/bin/ts3stream-control' >/dev/null 2>&1 || true
+        pkill -f '/opt/ts3stream/bin/livekit-server' >/dev/null 2>&1 || true
+    fi
+}
+
 download_control() {
     local url
     if [[ -n "${CONTROL_VERSION}" ]]; then
@@ -178,9 +191,14 @@ download_control() {
     else
         url="https://github.com/${REPO}/releases/latest/download/ts3stream-control-linux-amd64"
     fi
+    local target="/opt/ts3stream/bin/ts3stream-control"
+    local temp="${target}.new"
     log "downloading control API: ${url}"
-    curl -fL --retry 3 -o /opt/ts3stream/bin/ts3stream-control "${url}"
-    chmod 0755 /opt/ts3stream/bin/ts3stream-control
+    rm -f "$temp"
+    curl -fL --retry 3 -o "$temp" "${url}"
+    chmod 0755 "$temp"
+    # rename() replaces the directory entry even if the old binary is mapped.
+    mv -f "$temp" "$target"
 }
 
 download_livekit() {
@@ -198,7 +216,10 @@ download_livekit() {
     curl -fL --retry 3 -o "${tmp}/livekit.tar.gz" "${url}"
     tar -xzf "${tmp}/livekit.tar.gz" -C "${tmp}"
     [[ -f "${tmp}/livekit-server" ]] || die "livekit-server binary not found in archive"
-    install -m 0755 "${tmp}/livekit-server" /opt/ts3stream/bin/livekit-server
+    local target="/opt/ts3stream/bin/livekit-server"
+    local temp="${target}.new"
+    install -m 0755 "${tmp}/livekit-server" "$temp"
+    mv -f "$temp" "$target"
     rm -rf "${tmp}"
     trap - EXIT
 }
@@ -441,6 +462,7 @@ main() {
     ask_settings
     install_packages
     create_users
+    stop_existing_services
     download_control
     download_livekit
     write_configs
