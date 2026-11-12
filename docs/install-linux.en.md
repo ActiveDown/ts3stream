@@ -20,10 +20,10 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
-Or one command (Bash process substitution keeps interactive prompts working):
+Or one line (download to `/tmp`, then execute — this works with `sudo`):
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
 ```
 
 The installer asks for the public DNS name and confirmation, then installs

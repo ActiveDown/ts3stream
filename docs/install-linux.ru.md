@@ -20,10 +20,10 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
-Или одной командой (process substitution сохраняет интерактивные вопросы):
+Или одной строкой (скачать в `/tmp` и запустить — работает с `sudo`):
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
 ```
 
 Установщик спросит публичное DNS-имя и подтверждение, затем поставит LiveKit,

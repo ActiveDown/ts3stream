@@ -37,11 +37,11 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
-Or run it in one command (Bash process substitution keeps the interactive
-prompts working):
+Or run it in one line (download to `/tmp`, then execute — this works with
+`sudo` on all common Linux distributions):
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
 ```
 
 The installer prompts for the domain and confirmation, then:
