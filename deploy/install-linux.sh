@@ -182,7 +182,7 @@ detect_ts3_query() {
         log "using provided TS3 ServerQuery password"
         return 0
     fi
-    local dirs=("${TS3_SERVER_DIR}" /opt/ts3server /home/ts3/ts3server /opt/teamspeak3-server)
+    local dirs=("${TS3_SERVER_DIR}" /opt/ts3server /root/ts3server /root/teamspeak3-server /home/ts3/ts3server /opt/teamspeak3-server /usr/local/ts3server)
     local dir line found
     for dir in "${dirs[@]}"; do
         [[ -n "$dir" && -d "$dir" ]] || continue
@@ -200,7 +200,7 @@ detect_ts3_query() {
     if [[ -n "$found" && -d "$found" ]]; then
         dirs+=("$found")
     fi
-    found="$(find /opt /srv /home -maxdepth 4 -type f -name ts3server 2>/dev/null | head -n 1 || true)"
+    found="$(find /opt /srv /home /root /usr/local -maxdepth 4 -type f -name ts3server 2>/dev/null | head -n 1 || true)"
     if [[ -n "$found" ]]; then
         dirs+=("$(dirname "$found")")
     fi
