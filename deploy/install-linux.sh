@@ -185,6 +185,22 @@ find_ts3_service() {
         | awk '{print $1}' | grep -Ei '(^|[-_])(ts3server|teamspeak).*\.service$' | head -n 1 || true
 }
 
+query_login_ok() {
+    local password="$1"
+    timeout 5 bash -c '
+        exec 3<>/dev/tcp/127.0.0.1/10011 || exit 1
+        IFS= read -r -t 2 _ <&3 || true
+        printf "login serveradmin %s\n" "$1" >&3
+        while IFS= read -r -t 2 line <&3; do
+            case "$line" in
+                *"error id=0"*) exit 0 ;;
+                *"error id="*) exit 1 ;;
+            esac
+        done
+        exit 1
+    ' _ "$password" >/dev/null 2>&1
+}
+
 reset_ts3_query_password() {
     local service dir user newpass output
     service="$(find_ts3_service)"
@@ -218,17 +234,24 @@ reset_ts3_query_password() {
         return 1
     fi
     systemctl start "$service" >/dev/null 2>&1 || true
+    local i verified=0
+    for i in 1 2 3 4 5; do
+        sleep 1
+        if query_login_ok "$newpass"; then
+            verified=1
+            break
+        fi
+    done
 
-    if grep -qiE 'invalid|error|failed|cannot' "$output"; then
-        warn "ServerQuery reset output contains errors:"
-        tail -n 10 "$output" >&2 || true
+    if [[ "$verified" -eq 0 ]]; then
+        warn "ServerQuery password reset did not verify. Check the TS3 server log and set TS3_QUERY_PASSWORD manually."
         rm -f "$output"
         return 1
     fi
     rm -f "$output"
     TS3_QUERY_PASSWORD="$newpass"
     TS3_SERVER_DIR="$dir"
-    log "ServerQuery password reset; the new password is stored in control.env"
+    log "ServerQuery password reset and verified; the new password is stored in control.env"
     return 0
 }
 
@@ -290,8 +313,11 @@ detect_ts3_query() {
         read -r -s -p "Enter the current ServerQuery password (empty = reset it): " queryAnswer
         echo
         if [[ -n "${queryAnswer}" ]]; then
-            TS3_QUERY_PASSWORD="${queryAnswer}"
-            return 0
+            if query_login_ok "${queryAnswer}"; then
+                TS3_QUERY_PASSWORD="${queryAnswer}"
+                return 0
+            fi
+            warn "ServerQuery rejected that password"
         fi
         read -r -p "Reset the ServerQuery password automatically? The TS3 server will be restarted. [Y/n] " resetAnswer
         case "${resetAnswer}" in
