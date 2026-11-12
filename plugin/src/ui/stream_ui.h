@@ -99,6 +99,7 @@ private:
         QString title;
         int fps = 30;
         bool autoFps = false;
+        QSize resolutionBounds{1920, 1080};
         std::shared_ptr<media::LiveKitEngine> livekit;
         std::atomic<bool> livekitVideoReady{false};
 

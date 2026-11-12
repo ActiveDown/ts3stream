@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -63,21 +64,29 @@ public:
         root->setSpacing(10);
 
         auto* hint = new QLabel(QStringLiteral(
-            "Выберите экран или окно приложения, звук и частоту кадров."), this);
+            "Выберите экран или окно приложения, звук, разрешение и частоту кадров."), this);
         hint->setWordWrap(true);
         root->addWidget(hint);
 
         auto* qualityGroup = new QGroupBox(QStringLiteral("Качество видео"), this);
-        auto* qualityLayout = new QHBoxLayout(qualityGroup);
+        auto* qualityLayout = new QFormLayout(qualityGroup);
         qualityLayout->setContentsMargins(10, 14, 10, 10);
         qualityLayout->setSpacing(8);
-        qualityLayout->addWidget(new QLabel(QStringLiteral("Частота кадров:"), qualityGroup));
+        resolution_ = new QComboBox(qualityGroup);
+        resolution_->setObjectName(QStringLiteral("ts3stream_resolution"));
+        resolution_->addItem(QStringLiteral("720p — 1280×720"), 720);
+        resolution_->addItem(QStringLiteral("1080p — 1920×1080"), 1080);
+        resolution_->addItem(QStringLiteral("1440p — 2560×1440"), 1440);
+        resolution_->setCurrentIndex(1);
+        resolution_->setToolTip(QStringLiteral("Максимальный размер кадра. Пропорции сохраняются, маленькие окна не увеличиваются."));
+        qualityLayout->addRow(QStringLiteral("Разрешение:"), resolution_);
         fps_ = new QComboBox(qualityGroup);
+        fps_->setObjectName(QStringLiteral("ts3stream_fps"));
         fps_->addItem(QStringLiteral("30 FPS — стабильно"), 30);
         fps_->addItem(QStringLiteral("60 FPS — плавно"), 60);
         fps_->addItem(QStringLiteral("Авто — до 60 FPS по каналу"), 60);
         fps_->setCurrentIndex(0);
-        qualityLayout->addWidget(fps_, 1);
+        qualityLayout->addRow(QStringLiteral("Частота кадров:"), fps_);
         root->addWidget(qualityGroup);
 
         tabs_ = new QTabWidget(this);
@@ -190,6 +199,7 @@ public:
         }
 
         source.autoFps = fps_->currentIndex() == 2;
+        source.resolutionHeight = resolution_->currentData().toInt();
         source.fps = source.autoFps ? 60 : fps_->currentData().toInt();
         if (source.fps <= 0) {
             source.fps = 30;
@@ -252,6 +262,7 @@ private:
     QRadioButton* audioDevice_ = nullptr;
     QRadioButton* audioNone_ = nullptr;
     QComboBox* fps_ = nullptr;
+    QComboBox* resolution_ = nullptr;
 
     std::vector<media::MonitorInfo> monitors_;
     std::vector<media::WindowInfo> windowsList_;

@@ -3,6 +3,7 @@
 #include "stream_panel.h"
 #include "fullscreen_window.h"
 #include "live_stream_menu.h"
+#include "video_quality.h"
 #include "active_streams_button.h"
 #include "../diag/widget_dump.h"
 #include "../log.h"
@@ -1340,10 +1341,12 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
     state->title = source.title;
     state->fps = source.fps > 0 ? source.fps : 30;
     state->autoFps = source.autoFps;
+    state->resolutionBounds = videoResolutionBounds(source.resolutionHeight);
     state->started = std::chrono::steady_clock::now();
     captureState_ = state;
     publishing_ = true;
-    diag::log("StreamUi: capture fps=%d auto=%d", state->fps, state->autoFps ? 1 : 0);
+    diag::log("StreamUi: capture fps=%d auto=%d resolution=%dx%d", state->fps, state->autoFps ? 1 : 0,
+              state->resolutionBounds.width(), state->resolutionBounds.height());
 
     std::shared_ptr<media::LiveKitEngine> livekitEngine;
     if (token.url.isEmpty() || token.token.isEmpty()) {
@@ -1559,13 +1562,7 @@ void StreamUi::processVideoFrame(const std::shared_ptr<CaptureState>& state,
         std::memcpy(image.scanLine(y), src, rowBytes);
     }
 
-    // Screen text is the hard part: 720p from a 1440p desktop plus a fast
-    // downscale made glyphs unreadable. Encode 1080p and use a smooth filter.
-    constexpr int kMaxWidth = 1920;
-    constexpr int kMaxHeight = 1080;
-    if (image.width() > kMaxWidth || image.height() > kMaxHeight) {
-        image = image.scaled(kMaxWidth, kMaxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
+    image = scaleStreamFrame(image, state->resolutionBounds);
 
     media::CapturedVideoFrame scaledFrame;
     scaledFrame.width = image.width();

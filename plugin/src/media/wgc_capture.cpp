@@ -67,6 +67,8 @@ struct WgcCapture::Impl {
     winrt::com_ptr<ID3D11Texture2D> stagingTexture;
     int stagingWidth = 0;
     int stagingHeight = 0;
+    int poolWidth = 0;
+    int poolHeight = 0;
     bool apartmentInitialized = false;
     std::mutex frameMutex;
     int64_t lastAcceptedFrameUs = 0;
@@ -162,6 +164,10 @@ struct WgcCapture::Impl {
         }
 
         try {
+        // Serialize acquisition as well as copying: Recreate must not race a
+        // second callback holding an old frame or shutdown closing the pool.
+        std::lock_guard<std::mutex> frameLock(frameMutex);
+        if (!running.load()) return;
         auto frame = sender.TryGetNextFrame();
         if (!frame) {
             return;
@@ -177,7 +183,6 @@ struct WgcCapture::Impl {
         // allocated at a time. Compare against the last *accepted* frame, not
         // the previous callback, otherwise every 60 Hz frame is rejected by a
         // 30 fps limit.
-        std::lock_guard<std::mutex> frameLock(frameMutex);
         const int intervalUs = frameIntervalUs.load();
         // Timestamps from a 60 Hz compositor quantize to ~16666 us. A strict
         // 33333 us threshold would drop every second frame at 30 FPS, so allow
@@ -193,6 +198,17 @@ struct WgcCapture::Impl {
         const int width = static_cast<int>(contentSize.Width);
         const int height = static_cast<int>(contentSize.Height);
         if (width <= 0 || height <= 0) {
+            return;
+        }
+        if (width != poolWidth || height != poolHeight) {
+            // ContentSize changes immediately, but this frame still uses the
+            // old pool's texture. Discard it and acquire a complete new frame.
+            frame.Close();
+            frame = nullptr;
+            sender.Recreate(direct3DDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 3, contentSize);
+            diag::log("wgc frame pool resized: %dx%d -> %dx%d", poolWidth, poolHeight, width, height);
+            poolWidth = width;
+            poolHeight = height;
             return;
         }
 
@@ -211,11 +227,17 @@ struct WgcCapture::Impl {
             return;
         }
 
+        D3D11_TEXTURE2D_DESC textureDesc{};
+        texture->GetDesc(&textureDesc);
+        if (textureDesc.Width < static_cast<UINT>(width) || textureDesc.Height < static_cast<UINT>(height)) {
+            return;
+        }
         if (!ensureStaging(width, height)) {
             return;
         }
 
-        d3dContext->CopyResource(stagingTexture.get(), texture.get());
+        const D3D11_BOX region{0, 0, 0, static_cast<UINT>(width), static_cast<UINT>(height), 1};
+        d3dContext->CopySubresourceRegion(stagingTexture.get(), 0, 0, 0, 0, texture.get(), 0, &region);
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         hr = d3dContext->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped);
@@ -280,6 +302,9 @@ struct WgcCapture::Impl {
         try {
             item = std::move(captureItem);
             const auto size = item.Size();
+            poolWidth = size.Width;
+            poolHeight = size.Height;
+            lastAcceptedFrameUs = 0;
             framePool = Direct3D11CaptureFramePool::CreateFreeThreaded(
                 direct3DDevice,
                 DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -336,6 +361,8 @@ struct WgcCapture::Impl {
         stagingTexture = nullptr;
         stagingWidth = 0;
         stagingHeight = 0;
+        poolWidth = 0;
+        poolHeight = 0;
         callback = nullptr;
     }
 };

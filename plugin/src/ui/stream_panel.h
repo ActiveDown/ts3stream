@@ -11,6 +11,7 @@ class QHBoxLayout;
 class QLabel;
 class QToolButton;
 class QSlider;
+class QTimer;
 
 namespace ts3stream::ui {
 
@@ -61,12 +62,16 @@ public:
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void rebuildMembers(const std::vector<RoomMember>& members);
     void updateMembersBarGeometry();
     void hideMembersBar();
     void showMembersBar();
+    void trackControlsActivity(QWidget* widget);
+    void showFullscreenControls();
+    void hideIdleControls();
 
     QLabel* liveBadge_ = nullptr;
     QLabel* title_ = nullptr;
@@ -95,6 +100,9 @@ private:
     std::vector<RoomMember> members_;
     bool fullscreenMode_ = false;
     bool membersHidden_ = false;
+    QTimer* controlsIdleTimer_ = nullptr;
+    bool controlsHidden_ = false;
+    QPoint lastMousePosition_;
 
     std::function<void()> onClose_;
     std::function<void()> onFullscreen_;

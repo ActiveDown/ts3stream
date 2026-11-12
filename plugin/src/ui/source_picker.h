@@ -27,6 +27,7 @@ struct CaptureSource {
     // WebRTC reduce the actual frame rate/bitrate when the channel is tight.
     int fps = 30;
     bool autoFps = false;
+    int resolutionHeight = 1080;
 
     AudioType audioType = AudioType::None;
     std::wstring audioDeviceId;

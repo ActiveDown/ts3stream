@@ -1,6 +1,10 @@
 #include "stream_panel.h"
 
 #include <QHBoxLayout>
+#include <QApplication>
+#include <QCursor>
+#include <QMouseEvent>
+#include <QTimer>
 #include <QCloseEvent>
 #include <QLabel>
 #include <QPainter>
@@ -248,7 +252,13 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
     QObject::connect(hideMembersButton_, &QToolButton::clicked, this, [this] { hideMembersBar(); });
     QObject::connect(showMembersButton_, &QToolButton::clicked, this, [this] { showMembersBar(); });
 
+    controlsIdleTimer_ = new QTimer(this);
+    controlsIdleTimer_->setObjectName(QStringLiteral("ts3stream_controls_idle"));
+    controlsIdleTimer_->setSingleShot(true);
+    controlsIdleTimer_->setInterval(3000);
+    QObject::connect(controlsIdleTimer_, &QTimer::timeout, this, [this] { hideIdleControls(); });
     rebuildMembers({});
+    trackControlsActivity(this);
 }
 
 void StreamPanel::setTitle(const QString& title) {
@@ -339,6 +349,7 @@ void StreamPanel::rebuildMembers(const std::vector<RoomMember>& members) {
         auto* empty = new QLabel(QStringLiteral("Нет данных — подключись к серверу TS3"), membersBar_);
         empty->setStyleSheet("color: #8a8a8a; font-size: 11px;");
         membersLayout_->addWidget(empty);
+        trackControlsActivity(empty);
         membersLayout_->addStretch(1);
         return;
     }
@@ -358,12 +369,16 @@ void StreamPanel::rebuildMembers(const std::vector<RoomMember>& members) {
         label->setTextFormat(Qt::RichText);
         label->setStyleSheet("font-size: 12px;");
         membersLayout_->addWidget(label);
+        trackControlsActivity(label);
     }
     membersLayout_->addStretch(1);
 }
 
 void StreamPanel::setFullscreenMode(bool fullscreen) {
     fullscreenMode_ = fullscreen;
+    controlsIdleTimer_->stop();
+    controlsHidden_ = false;
+    canvas_->unsetCursor();
     if (fullscreen && audioControls_->parentWidget() != this) {
         audioControls_->setParent(this);
         audioControls_->show();
@@ -376,12 +391,10 @@ void StreamPanel::setFullscreenMode(bool fullscreen) {
     footerWidget_->setVisible(!fullscreen);
 
     if (fullscreen) {
-        if (!membersHidden_) {
-            membersBar_->show();
-            membersBar_->raise();
-        }
-        showMembersButton_->setVisible(membersHidden_);
+        lastMousePosition_ = QCursor::pos();
+        showFullscreenControls();
     } else {
+        audioControls_->show();
         membersBar_->hide();
         showMembersButton_->hide();
     }
@@ -392,9 +405,7 @@ void StreamPanel::hideMembersBar() {
     membersHidden_ = true;
     membersBar_->hide();
     if (fullscreenMode_) {
-        showMembersButton_->show();
-        showMembersButton_->raise();
-        updateMembersBarGeometry();
+        showFullscreenControls();
     }
     updateMembersBarGeometry();
 }
@@ -402,11 +413,65 @@ void StreamPanel::hideMembersBar() {
 void StreamPanel::showMembersBar() {
     membersHidden_ = false;
     if (fullscreenMode_) {
-        membersBar_->show();
-        membersBar_->raise();
+        showFullscreenControls();
     }
     showMembersButton_->hide();
     updateMembersBarGeometry();
+}
+
+void StreamPanel::trackControlsActivity(QWidget* widget) {
+    // Observe only plugin-owned widgets, never TS3's widget tree.
+    widget->setMouseTracking(true);
+    widget->installEventFilter(this);
+    for (auto* child : widget->findChildren<QWidget*>()) {
+        child->setMouseTracking(true);
+        child->installEventFilter(this);
+    }
+}
+
+bool StreamPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (fullscreenMode_) {
+        bool activity = false;
+        if (event->type() == QEvent::MouseMove) {
+            const QPoint position = static_cast<QMouseEvent*>(event)->globalPos();
+            activity = position != lastMousePosition_;
+            lastMousePosition_ = position;
+        } else {
+            activity = event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
+                       event->type() == QEvent::Wheel || event->type() == QEvent::KeyPress;
+        }
+        if (activity) showFullscreenControls();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void StreamPanel::showFullscreenControls() {
+    if (!fullscreenMode_) return;
+    controlsHidden_ = false;
+    canvas_->unsetCursor();
+    audioControls_->show();
+    membersBar_->setVisible(!membersHidden_);
+    showMembersButton_->setVisible(membersHidden_);
+    updateMembersBarGeometry();
+    controlsIdleTimer_->start();
+}
+
+void StreamPanel::hideIdleControls() {
+    if (!fullscreenMode_ || controlsHidden_) return;
+    const QPoint position = mapFromGlobal(QCursor::pos());
+    const auto hovered = [&](QWidget* widget) {
+        return widget->isVisible() && widget->geometry().contains(position);
+    };
+    if (QApplication::mouseButtons() != Qt::NoButton || volumeSlider_->isSliderDown() ||
+        hovered(audioControls_) || hovered(membersBar_) || hovered(showMembersButton_)) {
+        controlsIdleTimer_->start();
+        return;
+    }
+    controlsHidden_ = true;
+    audioControls_->hide();
+    membersBar_->hide();
+    showMembersButton_->hide();
+    canvas_->setCursor(Qt::BlankCursor);
 }
 
 void StreamPanel::updateMembersBarGeometry() {

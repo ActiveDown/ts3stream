@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -242,10 +243,6 @@ struct LiveKitEngine::Impl {
             if (!source) {
                 continue;
             }
-            if (frame && (frame->width != width || frame->height != height)) {
-                continue;
-            }
-
             try {
                 if (frame) {
                     const int rowBytes = frame->width * 4;
@@ -257,6 +254,14 @@ struct LiveKitEngine::Impl {
                     }
                     latestFrame = std::make_unique<livekit::VideoFrame>(frame->width, frame->height,
                         livekit::VideoBufferType::BGRA, std::move(pixels));
+                    // Keep the same published track and source. WebRTC accepts
+                    // per-frame dimensions; republishing would close viewers.
+                    if (width != frame->width || height != frame->height) {
+                        diag::log("LiveKit video size changed: %dx%d -> %dx%d", width, height,
+                                  frame->width, frame->height);
+                        width = frame->width;
+                        height = frame->height;
+                    }
                 }
                 if (!latestFrame) continue;
                 const int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -531,10 +536,11 @@ void LiveKitEngine::pushVideo(CapturedVideoFrame frame) {
     if (!impl_->videoStarted.load()) {
         return;
     }
-    if (frame.width != impl_->videoWidth.load() || frame.height != impl_->videoHeight.load()) {
+    if (frame.width <= 0 || frame.height <= 0 || frame.width > std::numeric_limits<int>::max() / 4 ||
+        frame.stride < frame.width * 4 ||
+        frame.bgra.size() / static_cast<size_t>(frame.stride) < static_cast<size_t>(frame.height)) {
         if (!impl_->videoErrorLogged.exchange(true)) {
-            diag::log("LiveKit video size mismatch: track=%dx%d frame=%dx%d",
-                      impl_->videoWidth.load(), impl_->videoHeight.load(), frame.width, frame.height);
+            diag::log("LiveKit invalid video frame: %dx%d stride=%d", frame.width, frame.height, frame.stride);
         }
         return;
     }
