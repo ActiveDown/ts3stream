@@ -5,7 +5,9 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QLineEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTimer>
 #include <cstdio>
@@ -38,15 +40,20 @@ int main(int argc, char** argv) {
                 if (!dialog) { app.exit(2); return; }
                 auto* resolution = dialog->findChild<QComboBox*>(QStringLiteral("ts3stream_resolution"));
                 auto* fps = dialog->findChild<QComboBox*>(QStringLiteral("ts3stream_fps"));
+                auto* bitrate = dialog->findChild<QSpinBox*>(QStringLiteral("ts3stream_bitrate"));
                 auto* tabs = dialog->findChild<QTabWidget*>();
                 auto* buttons = dialog->findChild<QDialogButtonBox*>();
-                if (!resolution || !fps || !tabs || !buttons) {
+                if (!resolution || !fps || !bitrate || !tabs || !buttons) {
                     check(false, "quality controls present");
                     dialog->reject();
                     return;
                 }
                 check(resolution->currentData().toInt() == 1080, "default is 1080p");
                 check(resolution->count() == 3, "three resolution presets");
+                check(bitrate->value() == 4000, "default bitrate is 4000 Kbit/s");
+                check(bitrate->minimum() == 1000 && bitrate->maximum() == 10000 && bitrate->singleStep() == 1000,
+                      "bitrate range and step");
+                bitrate->setValue(preset == 0 ? 1000 : preset == 1 ? 5000 : 10000);
                 resolution->setCurrentIndex(preset);
                 fps->setCurrentIndex(preset);
                 tabs->setCurrentIndex(tab);
@@ -56,6 +63,8 @@ int main(int argc, char** argv) {
             check(source.has_value(), "selection accepted");
             if (!source) continue;
             check(source->resolutionHeight == heights[preset], "selected resolution returned");
+            check(source->videoBitrateKbps == (preset == 0 ? 1000 : preset == 1 ? 5000 : 10000),
+                  "selected bitrate returned independently of source type");
             check(source->fps == (preset == 0 ? 30 : 60) && source->autoFps == (preset == 2),
                   "FPS selection independent of resolution");
             check(source->type == (tab == 0 ? ts3stream::ui::CaptureSource::Type::Monitor
@@ -78,6 +87,29 @@ int main(int argc, char** argv) {
         }
     }
     check(ts3stream::ui::videoResolutionBounds(0) == QSize(1920, 1080), "invalid preset fallback");
+    QTimer::singleShot(0, &app, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if (!dialog) { check(false, "bitrate dialog present"); return; }
+        auto* bitrate = dialog->findChild<QSpinBox*>(QStringLiteral("ts3stream_bitrate"));
+        if (!bitrate) { check(false, "bitrate control present"); dialog->reject(); return; }
+        bitrate->stepUp();
+        check(bitrate->value() == 5000, "step up by 1000");
+        bitrate->stepDown();
+        check(bitrate->value() == 4000, "step down by 1000");
+        auto* editor = bitrate->findChild<QLineEdit*>();
+        check(editor != nullptr, "manual bitrate entry present");
+        if (editor) {
+            editor->setText(QStringLiteral("7000"));
+            bitrate->interpretText();
+            check(bitrate->value() == 7000, "manually entered bitrate applied");
+        }
+        bitrate->setValue(0);
+        check(bitrate->value() == 1000, "minimum enforced");
+        bitrate->setValue(20000);
+        check(bitrate->value() == 10000, "maximum enforced");
+        dialog->reject();
+    });
+    check(!ts3stream::ui::pickCaptureSource(nullptr).has_value(), "edited bitrate cancelled without a source");
     QTimer::singleShot(0, &app, [] {
         if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget())) dialog->reject();
     });

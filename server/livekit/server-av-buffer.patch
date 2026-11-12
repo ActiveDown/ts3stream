@@ -1,5 +1,5 @@
 diff --git a/pkg/rtc/mediatrack.go b/pkg/rtc/mediatrack.go
-index 895216f..bf82e85 100644
+index 895216f..7e563d1 100644
 --- a/pkg/rtc/mediatrack.go
 +++ b/pkg/rtc/mediatrack.go
 @@ -72,6 +72,7 @@ type MediaTrack struct {
@@ -18,6 +18,16 @@ index 895216f..bf82e85 100644
  			sfu.WithEnableRTPStreamRestartDetection(t.params.EnableRTPStreamRestartDetection),
  		)
  		newWR.OnCloseHandler(func() {
+@@ -550,6 +552,9 @@ func (t *MediaTrack) AddReceiver(receiver *webrtc.RTPReceiver, track sfu.TrackRe
+ 	if layer >= 0 && len(layers) > int(layer) {
+ 		expectedBitrate = int(layers[layer].GetBitrate())
+ 	}
++	if t.params.ServerAVClock != nil && t.params.ServerAVClock.Delay > 0 {
++		buff.EnableServerAVBuffering()
++	}
+ 	if err := buff.Bind(receiver.GetParameters(), track.Codec().RTPCodecCapability, expectedBitrate); err != nil {
+ 		t.params.Logger.Warnw(
+ 			"binding buffer failed", err,
 diff --git a/pkg/rtc/participant.go b/pkg/rtc/participant.go
 index 63376ed..355456c 100644
 --- a/pkg/rtc/participant.go
@@ -39,7 +49,7 @@ index 63376ed..355456c 100644
  		ParticipantIdentity:    p.params.Identity,
  		ParticipantVersion:     p.version.Load(),
 diff --git a/pkg/rtc/room.go b/pkg/rtc/room.go
-index a67adf7..a8eeeab 100644
+index a67adf7..0cbd585 100644
 --- a/pkg/rtc/room.go
 +++ b/pkg/rtc/room.go
 @@ -253,6 +253,12 @@ func NewRoom(
@@ -49,8 +59,8 @@ index a67adf7..a8eeeab 100644
 +	if sfu.ServerAVDelay(room.Metadata) > 0 {
 +		// Retain up to five seconds at the supported 10 Mbit/s plus NACK
 +		// recovery headroom. Allocation remains bounded per source/layer.
-+		config.Receiver.PacketBufferSizeVideo = max(config.Receiver.PacketBufferSizeVideo, 16384)
-+		config.Receiver.PacketBufferSizeAudio = max(config.Receiver.PacketBufferSizeAudio, 2048)
++		config.Receiver.PacketBufferSizeVideo = max(config.Receiver.PacketBufferSizeVideo, buffer.ServerAVPacketBufferSizeVideo)
++		config.Receiver.PacketBufferSizeAudio = max(config.Receiver.PacketBufferSizeAudio, buffer.ServerAVPacketBufferSizeAudio)
 +	}
  	r := &Room{
  		protoRoom: proto.CloneOf(room),
@@ -96,10 +106,89 @@ index 421ed58..91af15d 100644
  	// NewHTTPHandler branches on a nil handler, which a typed-nil would defeat
  	var agentFront http.Handler
 diff --git a/pkg/sfu/buffer/buffer_base.go b/pkg/sfu/buffer/buffer_base.go
-index 03cf77e..c541f04 100644
+index 03cf77e..52b8287 100644
 --- a/pkg/sfu/buffer/buffer_base.go
 +++ b/pkg/sfu/buffer/buffer_base.go
-@@ -954,6 +954,11 @@ func (b *BufferBase) HandleIncomingPacketLocked(
+@@ -23,7 +23,6 @@ import (
+ 	"sync"
+ 	"time"
+ 
+-	"github.com/gammazero/deque"
+ 	"github.com/pion/rtcp"
+ 	"github.com/pion/rtp"
+ 	"github.com/pion/rtp/codecs"
+@@ -150,7 +149,9 @@ type BufferProvider interface {
+ }
+ 
+ const (
+-	bucketCapCheckInterval = 1e9
++	bucketCapCheckInterval        = 1e9
++	ServerAVPacketBufferSizeVideo = 16384
++	ServerAVPacketBufferSizeAudio = 2048
+ )
+ 
+ type BufferBaseParams struct {
+@@ -174,12 +175,13 @@ type BufferBase struct {
+ 
+ 	bucket               *bucket.Bucket[uint64, uint16]
+ 	lastBucketCapCheckAt int64
++	serverAVBuffering    bool
+ 
+ 	nacker              nack.NackQueueInterface
+ 	rtpStatsLite        *rtpstats.RTPStatsReceiverLite
+ 	liteStatsSnapshotId uint32
+ 
+-	extPackets deque.Deque[*ExtPacket]
++	extPackets extPacketQueue
+ 
+ 	codecType webrtc.RTPCodecType
+ 	closeOnce sync.Once
+@@ -290,6 +292,18 @@ func (b *BufferBase) SetLogger(lgr logger.Logger) {
+ 	}
+ }
+ 
++// EnableServerAVBuffering must be called before Bind. Normal bucket growth
++// retains about one second of traffic, which cannot cover server holdback.
++// Reserve bounded storage immediately, including when bitrate is unknown.
++func (b *BufferBase) EnableServerAVBuffering() {
++	b.Lock()
++	defer b.Unlock()
++	b.serverAVBuffering = true
++	b.extPackets.enableOrdering()
++	b.params.MaxVideoPkts = max(b.params.MaxVideoPkts, ServerAVPacketBufferSizeVideo)
++	b.params.MaxAudioPkts = max(b.params.MaxAudioPkts, ServerAVPacketBufferSizeAudio)
++}
++
+ func (b *BufferBase) Bind(rtpParameters webrtc.RTPParameters, codec webrtc.RTPCodecCapability, bitrate int) error {
+ 	b.logger.Debugw("binding track")
+ 
+@@ -369,11 +383,15 @@ func (b *BufferBase) BindLocked(rtpParameters webrtc.RTPParameters, codec webrtc
+ 		}
+ 	}
+ 
++	initialAudio, initialVideo := InitPacketBufferSizeAudio, InitPacketBufferSizeVideo
++	if b.serverAVBuffering {
++		initialAudio, initialVideo = ServerAVPacketBufferSizeAudio, ServerAVPacketBufferSizeVideo
++	}
+ 	switch {
+ 	case mime.IsMimeTypeAudio(b.mime):
+ 		b.codecType = webrtc.RTPCodecTypeAudio
+ 		b.bucket = bucket.NewBucket[uint64, uint16](
+-			InitPacketBufferSizeAudio,
++			initialAudio,
+ 			bucket.RTPMaxPktSize,
+ 			bucket.RTPSeqNumOffset,
+ 		)
+@@ -381,7 +399,7 @@ func (b *BufferBase) BindLocked(rtpParameters webrtc.RTPParameters, codec webrtc
+ 	case mime.IsMimeTypeVideo(b.mime):
+ 		b.codecType = webrtc.RTPCodecTypeVideo
+ 		b.bucket = bucket.NewBucket[uint64, uint16](
+-			InitPacketBufferSizeVideo,
++			initialVideo,
+ 			bucket.RTPMaxPktSize,
+ 			bucket.RTPSeqNumOffset,
+ 		)
+@@ -954,6 +972,11 @@ func (b *BufferBase) HandleIncomingPacketLocked(
  		if (b.extPacketTooMuchCount.Inc()-1)%100 == 0 {
  			b.logger.Warnw("too much ext packets", nil, "count", b.extPackets.Len())
  		}
@@ -113,17 +202,22 @@ index 03cf77e..c541f04 100644
  	b.maybeGrowBucket(arrivalTime)
 diff --git a/pkg/sfu/buffer/server_av_buffer_test.go b/pkg/sfu/buffer/server_av_buffer_test.go
 new file mode 100644
-index 0000000..ccb59ff
+index 0000000..1cb1f4e
 --- /dev/null
 +++ b/pkg/sfu/buffer/server_av_buffer_test.go
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,214 @@
 +package buffer
 +
 +import (
-+	"github.com/livekit/livekit-server/pkg/sfu/testutils/rtptest"
-+	"github.com/pion/transport/v4/packetio"
-+	"github.com/stretchr/testify/require"
++	_ "embed"
++	"encoding/json"
 +	"testing"
++
++	"github.com/livekit/livekit-server/pkg/sfu/testutils/rtptest"
++	"github.com/pion/rtp"
++	"github.com/pion/transport/v4/packetio"
++	"github.com/pion/webrtc/v4"
++	"github.com/stretchr/testify/require"
 +)
 +
 +func TestServerAVBufferBoundsMetadataWhileForwarderWaits(t *testing.T) {
@@ -140,6 +234,308 @@ index 0000000..ccb59ff
 +	require.Greater(t, primary.extPackets.Len(), 0)
 +	require.LessOrEqual(t, primary.extPackets.Len(), primary.bucket.Capacity())
 +}
++
++// A delayed forwarder must retain both packet metadata and the RTP bytes, even
++// when no bitrate was advertised and the adaptive bucket has not grown yet.
++func TestServerAVBufferRetainsDelayedPackets(t *testing.T) {
++	for _, tc := range []struct {
++		name  string
++		codec webrtc.RTPCodecParameters
++		count int
++	}{
++		{"audio", opusCodec, 500},
++		{"video", vp8Codec, 5000},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			primary := NewBuffer(fecTestMediaSSRC, 16384, 2048)
++			defer primary.Close()
++			primary.EnableServerAVBuffering()
++			require.NoError(t, primary.Bind(webrtc.RTPParameters{
++				Codecs: []webrtc.RTPCodecParameters{tc.codec},
++			}, tc.codec.RTPCodecCapability, 0))
++			packets := rtptest.GenerateVP8Packets(100, tc.count, uint8(tc.codec.PayloadType), fecTestMediaSSRC)
++			for i := range packets {
++				writePacket(t, primary, &packets[i])
++			}
++			primary.RLock()
++			queued := primary.extPackets.Len()
++			primary.RUnlock()
++			require.Equal(t, tc.count, queued, "packets discarded during server holdback")
++			var raw [1500]byte
++			for i := range packets {
++				ep, err := primary.ReadExtended(raw[:])
++				require.NoError(t, err)
++				require.NotNil(t, ep)
++				require.Equal(t, packets[i].SequenceNumber, ep.Packet.SequenceNumber)
++				var cached [1500]byte
++				n, err := primary.GetPacket(cached[:], ep.ExtSequenceNumber)
++				require.NoError(t, err)
++				var parsed rtp.Packet
++				require.NoError(t, parsed.Unmarshal(cached[:n]))
++				require.Equal(t, packets[i].SequenceNumber, parsed.SequenceNumber)
++				require.Equal(t, packets[i].Payload, parsed.Payload)
++				ReleaseExtPacket(ep)
++			}
++		})
++	}
++}
++
++func TestServerAVBufferInitialCapacityAndBound(t *testing.T) {
++	for _, serverMode := range []bool{false, true} {
++		for _, codec := range []webrtc.RTPCodecParameters{opusCodec, vp8Codec} {
++			primary := NewBuffer(fecTestMediaSSRC, 500, 200)
++			if serverMode {
++				primary.EnableServerAVBuffering()
++			}
++			require.NoError(t, primary.Bind(webrtc.RTPParameters{
++				Codecs: []webrtc.RTPCodecParameters{codec},
++			}, codec.RTPCodecCapability, 0))
++			capacity := InitPacketBufferSizeVideo
++			if codec.MimeType == opusCodec.MimeType {
++				capacity = InitPacketBufferSizeAudio
++			}
++			if serverMode {
++				capacity = ServerAVPacketBufferSizeVideo
++				if codec.MimeType == opusCodec.MimeType {
++					capacity = ServerAVPacketBufferSizeAudio
++				}
++			}
++			require.Equal(t, capacity, primary.bucket.Capacity())
++			packets := rtptest.GenerateVP8Packets(100, capacity+100, uint8(codec.PayloadType), fecTestMediaSSRC)
++			for i := range packets {
++				writePacket(t, primary, &packets[i])
++			}
++			primary.RLock()
++			queued, actualCapacity := primary.extPackets.Len(), primary.bucket.Capacity()
++			primary.RUnlock()
++			require.LessOrEqual(t, queued, capacity)
++			require.Equal(t, capacity, actualCapacity)
++			primary.Close()
++		}
++	}
++}
++
++func TestServerAVBufferRepairsArrivalOrderAcrossRollover(t *testing.T) {
++	primary := NewBuffer(fecTestMediaSSRC, 16384, 2048)
++	defer primary.Close()
++	primary.EnableServerAVBuffering()
++	bindFECTestBuffer(t, primary)
++	packets := rtptest.GenerateVP8Packets(65534, 4, uint8(vp8Codec.PayloadType), fecTestMediaSSRC)
++	for i := range packets {
++		packets[i].Timestamp = 90000 + uint32(i)*3000
++	}
++	for _, i := range []int{0, 2, 3, 1} {
++		writePacket(t, primary, &packets[i])
++	}
++	require.Equal(t, len(packets), primary.extPackets.Len())
++	var raw [1500]byte
++	for i := range packets {
++		ep, err := primary.ReadExtended(raw[:])
++		require.NoError(t, err)
++		require.Equal(t, packets[i].SequenceNumber, ep.Packet.SequenceNumber, "holdback must repair arrival order, not replay network jitter")
++		ReleaseExtPacket(ep)
++	}
++}
++
++func TestServerAVBufferRechecksRepairsArrivingDuringWait(t *testing.T) {
++	primary := NewBuffer(fecTestMediaSSRC, 16384, 2048)
++	defer primary.Close()
++	primary.EnableServerAVBuffering()
++	bindFECTestBuffer(t, primary)
++	packets := rtptest.GenerateVP8Packets(100, 4, uint8(vp8Codec.PayloadType), fecTestMediaSSRC)
++	writePacket(t, primary, &packets[0])
++	writePacket(t, primary, &packets[2])
++	var raw [1500]byte
++	first, err := primary.ReadExtended(raw[:])
++	require.NoError(t, err)
++	ReleaseExtPacket(first)
++	held, err := primary.ReadExtended(raw[:])
++	require.NoError(t, err)
++	// Packet 101 arrives while the forwarder holds 102 waiting for its deadline.
++	writePacket(t, primary, &packets[3])
++	writePacket(t, primary, &packets[1])
++	repaired := primary.ReorderExtended(held, raw[:])
++	require.NotNil(t, repaired)
++	require.Equal(t, uint16(101), repaired.Packet.SequenceNumber)
++	require.Equal(t, packets[1].Payload, repaired.Packet.Payload)
++	ReleaseExtPacket(repaired)
++	for i := 2; i < 4; i++ {
++		require.Positive(t, primary.extPackets.Len())
++		ep, err := primary.ReadExtended(raw[:])
++		require.NoError(t, err)
++		require.Equal(t, packets[i].SequenceNumber, ep.Packet.SequenceNumber)
++		require.Equal(t, packets[i].Payload, ep.Packet.Payload, "held packet bytes must survive shared scratch-buffer reuse")
++		ReleaseExtPacket(ep)
++	}
++	require.Zero(t, primary.extPackets.Len())
++}
++
++func TestServerAVOrdinaryBufferRemainsFIFO(t *testing.T) {
++	primary := NewBuffer(fecTestMediaSSRC, 500, 200)
++	defer primary.Close()
++	bindFECTestBuffer(t, primary)
++	packets := rtptest.GenerateVP8Packets(100, 4, uint8(vp8Codec.PayloadType), fecTestMediaSSRC)
++	order := []int{0, 2, 3, 1}
++	for _, i := range order {
++		writePacket(t, primary, &packets[i])
++	}
++	require.Equal(t, len(packets), primary.extPackets.Len())
++	var raw [1500]byte
++	for _, i := range order {
++		ep, err := primary.ReadExtended(raw[:])
++		require.NoError(t, err)
++		require.Equal(t, packets[i].SequenceNumber, ep.Packet.SequenceNumber)
++		ReleaseExtPacket(ep)
++	}
++}
++
++//go:embed testdata/server_av_reorder.json
++var serverAVReorderTrace []byte
++
++func TestServerAVBufferReplaysCapturedLateFrameTail(t *testing.T) {
++	var fixture struct {
++		Packets [][3]uint32 `json:"packets"`
++	}
++	require.NoError(t, json.Unmarshal(serverAVReorderTrace, &fixture))
++	require.Len(t, fixture.Packets, 651)
++	primary := NewBuffer(fecTestMediaSSRC, 16384, 2048)
++	defer primary.Close()
++	primary.EnableServerAVBuffering()
++	bindFECTestBuffer(t, primary)
++	packets := rtptest.GenerateVP8Packets(100, len(fixture.Packets), uint8(vp8Codec.PayloadType), fecTestMediaSSRC)
++	for _, row := range fixture.Packets {
++		packets[row[0]].Timestamp = 90000 + row[1]
++		writePacket(t, primary, &packets[row[0]])
++	}
++	require.Equal(t, len(packets), primary.extPackets.Len())
++	var raw [1500]byte
++	var previousTimestamp uint32
++	for i := range packets {
++		ep, err := primary.ReadExtended(raw[:])
++		require.NoError(t, err)
++		require.Equal(t, packets[i].SequenceNumber, ep.Packet.SequenceNumber)
++		require.GreaterOrEqual(t, ep.Packet.Timestamp, previousTimestamp, "do not interrupt an earlier frame with future frames")
++		require.Equal(t, packets[i].Payload, ep.Packet.Payload)
++		previousTimestamp = ep.Packet.Timestamp
++		ReleaseExtPacket(ep)
++	}
++}
+diff --git a/pkg/sfu/buffer/server_av_packet_queue.go b/pkg/sfu/buffer/server_av_packet_queue.go
+new file mode 100644
+index 0000000..c2651f1
+--- /dev/null
++++ b/pkg/sfu/buffer/server_av_packet_queue.go
+@@ -0,0 +1,103 @@
++// Copyright 2026 TS3Stream contributors. Licensed under Apache-2.0.
++package buffer
++
++import (
++	"container/heap"
++
++	"github.com/gammazero/deque"
++)
++
++// Ordinary tracks remain FIFO. Delayed tracks use extended sequence numbers,
++// so repairs arriving during holdback are released before subsequent packets.
++// BufferBase's lock and bucket-capacity bound cover both queue implementations.
++type extPacketQueue struct {
++	deque.Deque[*ExtPacket]
++	ordered bool
++	packets serverAVPacketHeap
++}
++
++type serverAVPacketHeap []*ExtPacket
++
++func (h serverAVPacketHeap) Len() int { return len(h) }
++func (h serverAVPacketHeap) Less(i, j int) bool {
++	return h[i].ExtSequenceNumber < h[j].ExtSequenceNumber
++}
++func (h serverAVPacketHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
++func (h *serverAVPacketHeap) Push(v any)   { *h = append(*h, v.(*ExtPacket)) }
++func (h *serverAVPacketHeap) Pop() any {
++	old := *h
++	p := old[len(old)-1]
++	old[len(old)-1] = nil
++	*h = old[:len(old)-1]
++	return p
++}
++
++func (q *extPacketQueue) enableOrdering() {
++	if q.ordered {
++		return
++	}
++	q.packets = make(serverAVPacketHeap, 0, max(128, q.Deque.Len()))
++	for q.Deque.Len() > 0 {
++		q.packets = append(q.packets, q.Deque.PopFront())
++	}
++	heap.Init(&q.packets)
++	q.ordered = true
++}
++
++func (q *extPacketQueue) Len() int {
++	if q.ordered {
++		return len(q.packets)
++	}
++	return q.Deque.Len()
++}
++
++func (q *extPacketQueue) PushBack(p *ExtPacket) {
++	if q.ordered {
++		heap.Push(&q.packets, p)
++		return
++	}
++	q.Deque.PushBack(p)
++}
++
++func (q *extPacketQueue) PopFront() *ExtPacket {
++	if q.ordered {
++		return heap.Pop(&q.packets).(*ExtPacket)
++	}
++	return q.Deque.PopFront()
++}
++
++func (q *extPacketQueue) Front() *ExtPacket {
++	if q.ordered {
++		return q.packets[0]
++	}
++	return q.Deque.Front()
++}
++
++func (q *extPacketQueue) Clear() {
++	q.Deque.Clear()
++	clear(q.packets)
++	q.packets = q.packets[:0]
++}
++
++// ReorderExtended rechecks packets which arrived while the forwarder waited.
++// Ownership of held is transferred back to the queue if an earlier packet is
++// returned; its bytes are reloaded from the bucket on its next dequeue. The
++// caller must re-evaluate the returned packet's deadline and release only that
++// packet. A nil result means the bucket no longer retained any candidate.
++func (b *BufferBase) ReorderExtended(held *ExtPacket, raw []byte) *ExtPacket {
++	b.Lock()
++	defer b.Unlock()
++	if !b.serverAVBuffering || b.isClosed.Load() || b.extPackets.Len() == 0 ||
++		b.extPackets.Front().ExtSequenceNumber >= held.ExtSequenceNumber {
++		return held
++	}
++	b.extPackets.PushBack(held)
++	for b.extPackets.Len() > 0 {
++		p := b.extPackets.PopFront()
++		if patched := b.patchExtPacket(p, raw); patched != nil {
++			return patched
++		}
++		ReleaseExtPacket(p)
++	}
++	return nil
++}
+diff --git a/pkg/sfu/buffer/testdata/server_av_reorder.json b/pkg/sfu/buffer/testdata/server_av_reorder.json
+new file mode 100644
+index 0000000..c139051
+--- /dev/null
++++ b/pkg/sfu/buffer/testdata/server_av_reorder.json
+@@ -0,0 +1 @@
++{"description":"Normalized RTP header order from a 0.6-second screen-share sample with a 227 ms late frame tail. No addresses, identities or media payloads. Columns: sequence offset, 90 kHz timestamp offset, arrival microseconds.","packets":[[0,0,0],[1,0,427],[2,0,460],[3,0,508],[4,0,537],[5,0,566],[6,0,1041],[7,0,1151],[8,0,1182],[9,0,1211],[10,0,1241],[11,0,1270],[12,0,1679],[13,0,1708],[14,0,1737],[15,0,1765],[16,0,1793],[17,0,2177],[18,0,2236],[19,0,2311],[20,0,2340],[21,0,2368],[22,0,2396],[23,0,2441],[24,0,2780],[25,0,2814],[26,0,2840],[27,0,2868],[28,0,2895],[29,0,3421],[30,0,3454],[31,0,3483],[32,0,3540],[33,0,3571],[34,0,3600],[35,0,4101],[36,0,4123],[37,0,4143],[38,0,4162],[39,0,4182],[40,0,4205],[41,0,8900],[42,0,8957],[43,0,8988],[44,0,9015],[45,0,9043],[46,0,9070],[47,0,9226],[48,0,9276],[49,0,42118],[50,0,42145],[51,0,42721],[52,3150,42752],[53,3150,42778],[54,3150,42806],[55,3150,42874],[56,3150,42900],[57,3150,43373],[58,3150,43414],[59,3150,43446],[60,3150,43471],[61,3150,43497],[62,3150,43973],[63,3150,44034],[64,3150,44061],[65,3150,44089],[66,3150,44114],[67,3150,44554],[68,3150,44580],[69,3150,44606],[70,3150,44631],[71,3150,44656],[72,3150,44682],[73,3150,44707],[74,3150,45146],[75,3150,45178],[76,3150,45237],[77,3150,45271],[78,3150,45298],[79,3150,45324],[80,3150,45817],[81,3150,45849],[82,3150,45878],[83,3150,45904],[84,3150,45930],[85,3150,46197],[86,3150,46227],[87,3150,46254],[88,3150,46279],[89,6390,69868],[90,6390,69887],[91,6390,69939],[92,6390,69954],[93,6390,69968],[94,6390,70443],[95,6390,70474],[96,6390,70502],[97,6390,70518],[98,6390,71174],[99,6390,71198],[100,6390,71212],[101,6390,71226],[102,6390,71239],[103,6390,71259],[104,6390,71285],[105,6390,71314],[106,6390,71332],[107,6390,71610],[108,6390,71656],[109,6390,71678],[110,6390,71693],[111,6390,72350],[112,6390,72388],[113,6390,72452],[114,6390,72533],[115,6390,72972],[116,6390,72990],[117,6390,73004],[118,6390,73017],[119,6390,73031],[120,6390,73376],[121,6390,73391],[122,6390,73424],[123,6390,73458],[124,9540,106335],[125,9540,106480],[126,9540,106512],[127,9540,106538],[128,9540,106567],[129,9540,106593],[130,9540,106871],[131,9540,106947],[132,9540,106962],[133,9540,106975],[134,9540,106990],[135,9540,107013],[136,9540,107590],[137,9540,107621],[138,9540,107651],[139,9540,107679],[140,9540,108074],[141,9540,108093],[142,9540,108112],[143,9540,108127],[144,9540,108141],[145,9540,108160],[146,9540,108694],[147,9540,108727],[148,9540,108757],[149,9540,108785],[150,9540,108815],[151,9540,108870],[152,9540,109304],[153,9540,109322],[154,9540,109335],[155,9540,109359],[156,9540,109466],[157,9540,110373],[158,9540,110392],[159,9540,110468],[160,9540,110492],[161,9540,110505],[162,9540,110518],[163,9540,110531],[164,12690,141535],[165,12690,142773],[166,12690,142790],[167,12690,142803],[168,12690,142816],[169,12690,142829],[170,12690,142841],[171,12690,143376],[172,12690,143443],[173,12690,143480],[174,12690,143494],[175,12690,143507],[176,12690,143520],[177,12690,143533],[178,12690,143546],[179,12690,143558],[180,12690,143571],[181,12690,143584],[182,12690,143597],[183,12690,143609],[184,12690,143622],[185,12690,143890],[186,12690,143903],[187,12690,143916],[188,12690,144455],[189,12690,144544],[190,12690,144560],[191,12690,144573],[192,12690,144610],[193,12690,144623],[194,12690,144636],[195,12690,144649],[196,12690,145041],[197,12690,145140],[198,12690,145156],[199,12690,145169],[200,12690,145182],[201,12690,145194],[202,12690,145207],[203,12690,145611],[204,15930,177380],[205,15930,177396],[206,15930,177435],[207,15930,177466],[208,15930,177959],[209,15930,177981],[210,15930,177996],[211,15930,178047],[212,15930,178074],[213,15930,178092],[214,15930,178747],[215,15930,178774],[216,15930,178804],[217,15930,178830],[218,15930,178846],[219,15930,178860],[220,15930,179193],[221,15930,179206],[222,15930,179219],[223,15930,179235],[224,15930,179257],[225,15930,179731],[226,15930,179760],[227,15930,179788],[228,15930,179817],[229,15930,179844],[230,15930,179868],[231,15930,180343],[232,15930,180371],[233,15930,180428],[234,15930,180443],[235,15930,180822],[236,15930,180900],[237,15930,180916],[238,15930,180929],[239,15930,180942],[240,15930,180955],[241,15930,180968],[242,15930,181475],[243,15930,181504],[244,19080,218799],[245,19080,218817],[246,19080,218847],[247,19080,218868],[248,19080,218881],[249,19080,218915],[250,19080,218932],[251,19080,218946],[252,19080,218959],[253,19080,218980],[254,19080,218994],[255,19080,219007],[256,19080,219020],[257,19080,219033],[258,19080,219053],[259,19080,219066],[260,19080,219080],[261,19080,219092],[262,19080,219121],[263,19080,219134],[264,19080,219147],[265,19080,219160],[266,19080,219173],[267,19080,219221],[268,19080,219236],[269,19080,219249],[270,19080,219262],[271,19080,219275],[272,19080,219287],[273,19080,219300],[274,19080,219313],[275,19080,219337],[276,19080,219367],[277,19080,219392],[278,19080,219435],[279,19080,219491],[280,19080,219506],[281,19080,219548],[282,22230,246726],[283,22230,246741],[284,22230,246755],[285,22230,247249],[286,22230,247263],[287,22230,247276],[288,22230,247289],[289,22230,247303],[290,22230,247844],[291,22230,247860],[292,22230,247874],[293,22230,247887],[294,22230,247900],[295,22230,247914],[296,22230,247927],[297,22230,248510],[298,22230,248552],[299,22230,248566],[300,22230,248579],[301,22230,248592],[302,22230,249005],[303,22230,249022],[304,22230,249071],[305,22230,249086],[306,22230,249099],[307,22230,249593],[308,22230,249607],[309,22230,249620],[310,22230,249633],[311,22230,249646],[312,22230,249659],[313,22230,249672],[314,22230,250283],[315,22230,250302],[316,22230,250341],[317,22230,250376],[318,25290,281941],[319,25290,281965],[320,25290,282028],[321,25290,282520],[322,25290,282542],[323,25290,282559],[324,25290,282606],[325,25290,282622],[326,25290,282635],[328,25290,282648],[329,25290,283005],[330,25290,283020],[331,25290,283034],[332,25290,283047],[333,25290,283067],[334,25290,283630],[335,25290,283651],[336,25290,283691],[337,25290,283705],[338,25290,283718],[339,25290,283731],[340,25290,284225],[341,25290,284243],[342,25290,284256],[343,25290,284270],[344,25290,284349],[345,25290,284411],[346,25290,284433],[347,25290,284771],[348,25290,284789],[349,25290,284802],[350,25290,284816],[351,25290,284829],[352,25290,285352],[353,25290,285370],[354,28530,318306],[355,28530,318324],[356,28530,318378],[357,28530,318393],[358,28530,318427],[359,28530,318455],[360,28530,318899],[361,28530,318917],[362,28530,318991],[363,28530,319006],[364,28530,319019],[365,28530,319531],[366,28530,319614],[367,28530,319637],[368,28530,319651],[369,28530,319665],[370,28530,319678],[371,28530,320151],[372,28530,320167],[373,28530,320204],[374,28530,320221],[375,28530,320235],[376,28530,320248],[377,28530,320677],[378,28530,320694],[379,28530,320707],[380,28530,320720],[381,28530,320733],[382,28530,321274],[383,28530,321287],[384,28530,321323],[385,28530,321342],[386,28530,321355],[387,28530,321368],[388,28530,321381],[389,28530,321869],[390,28530,321886],[391,28530,321900],[392,28530,321913],[393,31860,355385],[394,31860,355420],[395,31860,355975],[396,31860,356033],[397,31860,356048],[398,31860,356061],[399,31860,356074],[400,31860,356087],[401,31860,356740],[402,31860,356772],[403,31860,356785],[404,31860,356799],[405,31860,356812],[406,31860,356825],[407,31860,356838],[408,31860,357125],[409,31860,357138],[410,31860,357151],[411,31860,357164],[412,31860,357225],[413,31860,357695],[414,31860,357709],[415,31860,357722],[416,31860,357735],[417,31860,357748],[418,31860,358340],[419,31860,358353],[420,31860,358366],[421,31860,358477],[422,31860,358494],[423,31860,358970],[424,31860,358983],[425,31860,358997],[426,31860,359010],[427,31860,359023],[428,31860,359036],[429,31860,359052],[430,31860,359080],[431,35100,392453],[432,35100,392513],[433,35100,392550],[434,35100,392612],[435,35100,393014],[436,35100,393029],[437,35100,393043],[438,35100,393057],[439,35100,393070],[440,35100,393083],[441,35100,393096],[442,35100,393558],[443,35100,393576],[444,35100,393589],[445,35100,393638],[446,35100,393653],[447,35100,393666],[448,35100,394165],[449,35100,394286],[450,35100,394302],[451,35100,394710],[452,35100,394804],[453,35100,394820],[454,35100,394839],[455,35100,394905],[456,35100,394942],[457,35100,394987],[458,35100,395006],[459,35100,395019],[460,35100,395384],[461,35100,395416],[462,35100,395434],[463,35100,395459],[464,35100,395489],[465,35100,396026],[466,35100,396040],[467,35100,396053],[468,35100,396067],[469,38340,428230],[470,38340,428803],[471,38340,428883],[472,38340,428920],[473,38340,429009],[474,38340,429044],[475,38340,429375],[476,38340,429433],[477,38340,429470],[478,38340,429558],[479,38340,429592],[480,38340,429624],[481,38340,429985],[482,38340,430022],[483,38340,430056],[484,38340,430142],[485,38340,430211],[486,38340,430540],[487,38340,430577],[488,38340,430611],[489,38340,430708],[490,38340,430744],[491,38340,430775],[492,38340,430808],[493,38340,431160],[494,38340,431196],[495,38340,431227],[496,38340,431345],[497,38340,431382],[498,38340,431722],[499,38340,431758],[500,38340,431790],[501,38340,431879],[502,38340,431912],[503,38340,431945],[504,38340,432394],[505,38340,432448],[506,41580,463551],[507,41580,463592],[508,41580,463628],[509,41580,464070],[510,41580,464108],[511,41580,464143],[512,41580,464178],[513,41580,464211],[514,41580,464244],[515,41580,464277],[516,41580,464682],[517,41580,464718],[518,41580,464753],[519,41580,464836],[520,41580,464870],[521,41580,465321],[522,41580,465359],[523,41580,465392],[524,41580,465482],[525,41580,465877],[526,41580,465959],[527,41580,465994],[528,41580,466028],[529,41580,466061],[530,41580,466098],[531,41580,466130],[532,41580,466162],[533,41580,466358],[534,41580,466439],[535,41580,466567],[536,41580,466601],[537,41580,466636],[538,41580,466669],[539,41580,466908],[540,41580,466945],[541,41580,466980],[542,41580,467058],[543,44820,498882],[544,44820,498917],[545,44820,499224],[546,44820,499241],[547,44820,499255],[548,44820,499300],[549,44820,499818],[550,44820,499836],[551,44820,499909],[552,44820,499925],[553,44820,499939],[554,44820,499953],[555,44820,499966],[556,44820,499979],[557,44820,500589],[558,44820,500608],[559,44820,500622],[560,44820,500635],[561,44820,500649],[562,44820,500972],[563,44820,501051],[564,44820,501102],[565,44820,501131],[566,44820,501148],[567,44820,501161],[568,44820,501174],[569,44820,501673],[570,44820,501687],[571,44820,501701],[572,44820,501714],[573,44820,501728],[574,44820,502160],[575,44820,502174],[576,44820,502220],[327,25290,509120],[577,47970,534064],[578,47970,534091],[579,47970,534107],[580,47970,534121],[581,47970,534135],[582,47970,534148],[583,47970,534205],[584,47970,534527],[585,47970,534554],[586,47970,535155],[587,47970,535175],[588,47970,535189],[589,47970,535203],[590,47970,535216],[591,47970,535229],[592,47970,535242],[593,47970,535255],[594,47970,535269],[595,47970,535723],[596,47970,535741],[597,47970,535755],[598,47970,535768],[599,47970,535788],[600,47970,535801],[601,47970,536319],[602,47970,536351],[603,47970,536415],[604,47970,536433],[605,47970,536446],[606,47970,536465],[607,47970,537027],[608,47970,537041],[609,47970,537461],[610,51120,569260],[611,51120,569288],[612,51120,569313],[613,51120,569776],[614,51120,569794],[615,51120,569808],[616,51120,569822],[617,51120,570352],[618,51120,570369],[619,51120,570383],[620,51120,570396],[621,51120,570427],[622,51120,570440],[623,51120,570453],[624,51120,570941],[625,51120,570961],[626,51120,571018],[627,51120,571032],[628,51120,571045],[629,51120,571058],[630,51120,571430],[631,51120,571482],[632,51120,571497],[633,51120,571510],[634,51120,571523],[635,51120,572021],[636,51120,572040],[637,51120,572088],[638,51120,572103],[639,51120,572142],[640,51120,572156],[641,51120,572620],[642,51120,572638],[643,51120,572690],[644,51120,572705],[645,51120,572718],[646,51120,572731],[647,51120,572744],[648,51120,573144],[649,51120,573158],[650,51120,573172]]}
 diff --git a/pkg/sfu/receiver.go b/pkg/sfu/receiver.go
 index 0bc5663..28c225e 100644
 --- a/pkg/sfu/receiver.go
@@ -159,7 +555,7 @@ index 0bc5663..28c225e 100644
  func WithPliThrottleConfig(pliThrottleConfig PLIThrottleConfig) ReceiverOpts {
  	return func(w *WebRTCReceiver) *WebRTCReceiver {
 diff --git a/pkg/sfu/receiver_base.go b/pkg/sfu/receiver_base.go
-index 8b34920..1a57e47 100644
+index 8b34920..a09d343 100644
 --- a/pkg/sfu/receiver_base.go
 +++ b/pkg/sfu/receiver_base.go
 @@ -117,7 +117,9 @@ type ReceiverBaseParams struct {
@@ -189,21 +585,42 @@ index 8b34920..1a57e47 100644
  
  	if clearBuffers {
  		r.ClearAllBuffers(reason)
-@@ -918,6 +922,9 @@ func (r *ReceiverBase) forwardRTP(
+@@ -918,6 +922,15 @@ func (r *ReceiverBase) forwardRTP(
  	}
  
  	pktBuf := make([]byte, bucket.RTPMaxPktSize)
 +	avTimer := time.NewTimer(time.Hour)
 +	avTimer.Stop()
 +	defer avTimer.Stop()
++	reorder, _ := buff.(interface {
++		ReorderExtended(*buffer.ExtPacket, []byte) *buffer.ExtPacket
++	})
++	avLogAt := mono.UnixNano()
++	avRead, avReports, avReordered, avLate, avNoWrites := 0, 0, 0, 0, 0
++	var avMaxLate, avMaxHold int64
  	r.params.Logger.Debugw(
  		"starting forwarding",
  		"layer", layer,
-@@ -933,6 +940,27 @@ func (r *ReceiverBase) forwardRTP(
+@@ -933,6 +946,60 @@ func (r *ReceiverBase) forwardRTP(
  		if extPkt == nil {
  			continue
  		}
-+		if r.serverAVClock != nil && r.serverAVClock.Delay > 0 {
++		if r.serverAVClock != nil {
++			avRead++
++			if sr := buff.GetSenderReportData(); sr != nil && sr.NtpTimestamp != 0 {
++				avReports++
++			}
++			if now := mono.UnixNano(); now-avLogAt >= int64(5*time.Second) {
++				r.params.Logger.Infow("TS3Stream buffer diagnostics", "read", avRead, "withSenderReport", avReports,
++					"clockRate", r.params.Codec.ClockRate, "reselected", avReordered, "lateDrops", avLate,
++					"zeroWrites", avNoWrites, "maxLateMs", avMaxLate/1e6, "maxHoldMs", avMaxHold/1e6,
++					"forwardedTotal", numPacketsForwarded, "droppedTotal", numPacketsDropped)
++				avLogAt = now
++				avRead, avReports, avReordered, avLate, avNoWrites = 0, 0, 0, 0, 0
++				avMaxLate, avMaxHold = 0, 0
++			}
++		}
++		for extPkt != nil && r.serverAVClock != nil && r.serverAVClock.Delay > 0 {
 +			// ReadExtended owns extPkt and pktBuf until the next read. Remaining
 +			// packets stay in the bounded ingress bucket, which also serves NACKs.
 +			due, ready := r.serverAVClock.Wait(extPkt.Arrival, extPkt.Packet.Timestamp,
@@ -214,20 +631,48 @@ index 8b34920..1a57e47 100644
 +				buffer.ReleaseExtPacket(extPkt)
 +				return
 +			}
++			// A repaired/late packet may have arrived behind the held packet
++			// during the wait. Select again before transmitting, not afterwards.
++			if reorder != nil {
++				next := reorder.ReorderExtended(extPkt, pktBuf)
++				if next != extPkt {
++					avReordered++
++					extPkt = next
++					continue
++				}
++			}
 +			// A stalled server must not replay a burst of seconds-old content.
-+			if mono.UnixNano()-due > int64(250*time.Millisecond) {
++			lateness := mono.UnixNano() - due
++			avMaxLate = max(avMaxLate, lateness)
++			avMaxHold = max(avMaxHold, mono.UnixNano()-extPkt.Arrival)
++			if lateness > int64(250*time.Millisecond) {
++				avLate++
 +				numPacketsDropped++
 +				if r.Kind() == webrtc.RTPCodecTypeVideo {
 +					buff.SendPLI(false)
 +				}
 +				buffer.ReleaseExtPacket(extPkt)
-+				continue
++				extPkt = nil
 +			}
++			break
++		}
++		if extPkt == nil {
++			continue
 +		}
  		dequeuedAt := mono.UnixNano()
  
  		if extPkt.Packet.PayloadType != uint8(r.params.Codec.PayloadType) {
-@@ -977,7 +1005,7 @@ func (r *ReceiverBase) forwardRTP(
+@@ -966,6 +1033,9 @@ func (r *ReceiverBase) forwardRTP(
+ 		}
+ 
+ 		writeCount := sfuutils.BroadcastRTP(r.downTrackSpreader, extPkt, spatialLayer)
++		if writeCount == 0 {
++			avNoWrites++
++		}
+ 		if rt := r.loadREDTransformer(); rt != nil {
+ 			writeCount += rt.ForwardRTP(extPkt, spatialLayer)
+ 		}
+@@ -977,7 +1047,7 @@ func (r *ReceiverBase) forwardRTP(
  		// delivered back-to-back) which the single forwarder goroutine drains
  		// serially, inflating the measured transit for the tail of the burst. That
  		// reflects loss recovery rather than steady-state forwarding health.
@@ -408,7 +853,7 @@ index 0000000..cadfe1c
 +	require.Equal(t, now.UnixNano()+int64(2*time.Second), c.Deadline(now.UnixNano(), 123, 48000, sr), "clock jump cannot create an hour-long queue")
 +}
 diff --git a/version/version.go b/version/version.go
-index 47bb7ac..114c007 100644
+index 47bb7ac..5e5bf96 100644
 --- a/version/version.go
 +++ b/version/version.go
 @@ -14,4 +14,4 @@
@@ -416,4 +861,4 @@ index 47bb7ac..114c007 100644
  package version
  
 -const Version = "1.13.11"
-+const Version = "1.13.11-ts3stream.1"
++const Version = "1.13.11-ts3stream.4"

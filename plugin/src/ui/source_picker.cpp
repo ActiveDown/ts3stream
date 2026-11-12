@@ -16,6 +16,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -52,7 +53,7 @@ public:
             "QListWidget { background: #232323; color: #e0e0e0; border: none; }"
             "QListWidget::item { padding: 6px; }"
             "QListWidget::item:selected { background: #3d5a80; }"
-            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #4a4a4a; padding: 3px 6px; }"
+            "QComboBox, QSpinBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #4a4a4a; padding: 3px 6px; }"
             "QComboBox QAbstractItemView { background: #232323; color: #e0e0e0; selection-background-color: #3d5a80; }"
             "QPushButton { background: #333333; color: #e0e0e0; border: 1px solid #4a4a4a;"
             "  padding: 5px 14px; border-radius: 3px; }"
@@ -117,6 +118,19 @@ public:
         audioLayout->addWidget(audioDevice_);
         audioLayout->addWidget(audioNone_);
         root->addWidget(audioGroup);
+
+        auto* bitrateLayout = new QFormLayout();
+        bitrate_ = new QSpinBox(this);
+        bitrate_->setObjectName(QStringLiteral("ts3stream_bitrate"));
+        bitrate_->setRange(media::kMinVideoBitrateKbps, media::kMaxVideoBitrateKbps);
+        bitrate_->setSingleStep(1000);
+        bitrate_->setValue(media::kDefaultVideoBitrateKbps);
+        bitrate_->setSuffix(QStringLiteral(" Кбит/с"));
+        bitrate_->setToolTip(QStringLiteral(
+            "Верхний предел видеобитрейта. При ухудшении связи скорость снижается автоматически. "
+            "Применяется при запуске этого стрима."));
+        bitrateLayout->addRow(QStringLiteral("Битрейт видео:"), bitrate_);
+        root->addLayout(bitrateLayout);
 
         auto* bottom = new QHBoxLayout();
         auto* refresh = new QPushButton(QStringLiteral("Обновить"), this);
@@ -200,6 +214,7 @@ public:
 
         source.autoFps = fps_->currentIndex() == 2;
         source.resolutionHeight = resolution_->currentData().toInt();
+        source.videoBitrateKbps = bitrate_->value();
         source.fps = source.autoFps ? 60 : fps_->currentData().toInt();
         if (source.fps <= 0) {
             source.fps = 30;
@@ -263,6 +278,7 @@ private:
     QRadioButton* audioNone_ = nullptr;
     QComboBox* fps_ = nullptr;
     QComboBox* resolution_ = nullptr;
+    QSpinBox* bitrate_ = nullptr;
 
     std::vector<media::MonitorInfo> monitors_;
     std::vector<media::WindowInfo> windowsList_;

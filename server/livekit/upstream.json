@@ -2,6 +2,6 @@
   "repository": "https://github.com/livekit/livekit.git",
   "tag": "v1.13.11",
   "commit": "385aa40f9292fe1db8caad87301e4b285b7c198a",
-  "version": "1.13.11-ts3stream.1",
+  "version": "1.13.11-ts3stream.4",
   "patch": "server-av-buffer.patch"
 }

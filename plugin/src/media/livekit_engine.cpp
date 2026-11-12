@@ -1,5 +1,6 @@
 #include "livekit_engine.h"
 #include "video_send_queue.h"
+#include "video_bitrate.h"
 #include "rtc_diagnostics.h"
 #include "delayed_audio.h"
 
@@ -134,6 +135,7 @@ struct LiveKitEngine::Impl {
     std::atomic<int> videoWidth{0};
     std::atomic<int> videoHeight{0};
     std::atomic<int> videoFps{30};
+    int videoBitrate = 0; // protected by roomMutex, like publication settings
     std::atomic<bool> videoStarted{false};
     std::atomic<bool> audioStarted{false};
     std::atomic<bool> videoErrorLogged{false};
@@ -564,7 +566,7 @@ void LiveKitEngine::setStreamEndedCallback(StreamEndedCallback callback) {
     impl_->streamEndedCallback = std::move(callback);
 }
 
-bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& error) {
+bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& error, int maxBitrateKbps) {
     std::lock_guard<std::mutex> lock(impl_->roomMutex);
     if (!impl_->room) {
         error = "not connected";
@@ -577,8 +579,9 @@ bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& err
     if (fps <= 0) {
         fps = 30;
     }
+    const int maxBitrate = videoBitrateBps(maxBitrateKbps, std::getenv("TS3STREAM_MAX_BITRATE"));
     if (impl_->videoStarted.load() && impl_->videoWidth.load() == width &&
-        impl_->videoHeight.load() == height && impl_->videoFps.load() == fps) {
+        impl_->videoHeight.load() == height && impl_->videoFps.load() == fps && impl_->videoBitrate == maxBitrate) {
         return true;
     }
 
@@ -602,13 +605,6 @@ bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& err
         // value is the ceiling, not a fixed rate: on a clean channel the
         // encoder climbs towards it, and congestion control lowers it
         // automatically when loss/RTT grows.
-        int maxBitrate = 10'000'000;
-        if (const char* configured = std::getenv("TS3STREAM_MAX_BITRATE")) {
-            const int parsed = std::atoi(configured);
-            if (parsed >= 1'000'000) {
-                maxBitrate = parsed;
-            }
-        }
         options.video_encoding = livekit::VideoEncodingOptions{
             static_cast<uint64_t>(maxBitrate), static_cast<double>(fps)};
         options.video_encoder = livekit::VideoEncoderBackend::Auto;
@@ -625,6 +621,7 @@ bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& err
         impl_->videoWidth.store(width);
         impl_->videoHeight.store(height);
         impl_->videoFps.store(fps);
+        impl_->videoBitrate = maxBitrate;
         impl_->videoStarted.store(true);
         impl_->videoSender = std::thread([impl = impl_.get(), source, width, height] {
             impl->videoSenderLoop(source, width, height);

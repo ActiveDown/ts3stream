@@ -42,7 +42,8 @@ public:
     // Called on an SDK thread; the UI must queue teardown onto its own thread.
     void setStreamEndedCallback(StreamEndedCallback callback);
 
-    bool ensureVideo(int width, int height, int fps, std::string& error);
+    // Explicit client selection in Kbit/s; zero retains diagnostic env support.
+    bool ensureVideo(int width, int height, int fps, std::string& error, int maxBitrateKbps = 0);
     bool ensureAudio(std::string& error);
 
     void pushVideo(CapturedVideoFrame frame);

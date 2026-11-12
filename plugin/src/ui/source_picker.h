@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include "../media/video_bitrate.h"
 
 #include <QString>
 
@@ -28,6 +29,7 @@ struct CaptureSource {
     int fps = 30;
     bool autoFps = false;
     int resolutionHeight = 1080;
+    int videoBitrateKbps = media::kDefaultVideoBitrateKbps;
 
     AudioType audioType = AudioType::None;
     std::wstring audioDeviceId;

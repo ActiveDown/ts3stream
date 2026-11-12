@@ -10,9 +10,13 @@ Configure the plugin with `-DTS3STREAM_BUILD_UI_TESTS=ON` using the same MSVC/Qt
 
 These tests use the real window helpers, StreamPanel and LiveKitEngine. Final in-client validation still requires restarting TS3 with the rebuilt plugin.
 
+`capture_wan_test.exe <tokens.json>` is an opt-in interactive movie/window capture diagnostic (`-DTS3STREAM_BUILD_CAPTURE_WAN_TEST=ON`, Qt Multimedia required). It displays a local video file in its own 1920×1080 window, captures only that window using production WGC, and publishes through production LiveKitEngine to two independently decoding viewers. It never captures the microphone or other windows. Use isolated temporary APPDATA and a dedicated server-buffered room. JSON keys: `url`, `publisherToken`, `viewerToken`, `viewer2Token`, `targetIdentity`, `movie`, `resultFile`; optional `durationMs` (default 90000), `warmupMs` (default 10000). Set the process-only `TS3STREAM_MAX_BITRATE` to compare limits. The test exports visual frame-ID delays, capture/decode cadence and >200 ms gaps; startup is excluded, the server buffer drains at shutdown. It rejects absent movie playback, bad frame IDs, insufficient frame delivery, >250 ms decode gaps or excessive delay. Audio is muted and not transmitted; this does not verify physical speakers/display or a different sender's network. A real on-screen desktop at least 1920×1080 is required (exit 77 otherwise). Keep tokens out of the repository and delete them and the dedicated room after use.
+
 Add `static` as the fourth argument to `stream_ended_test.exe` to send exactly one frame before the viewer joins, then no source updates. This reproduces the late-subscriber/static-window issue; the viewer must still receive video and the stream-ended callback.
 
 Use `resize` instead of `static` to send eight size/content stages over the same published track, including 1920×1044 → 1920×1080 → 2560×1440 → 1920×1044. The receiver must observe both the new dimensions and the new pixels at every stage, without a premature stream-ended event. Before the fix this times out at stage 1 while receiving repeated old frames.
+
+For `capture_wan_test`, set `QT_MULTIMEDIA_PREFERRED_PLUGINS=windowsmediafoundation` to use Windows' built-in H.264 decoder. A config with `probeOnly=true` and `movie` only plays that local movie for five seconds without connecting or capturing.
 
 `wgc_resize_test.exe` captures its own animated native window, enters/exits fullscreen and resizes it (including odd dimensions). It verifies fresh center/corner pixels across seven stages. Run on an interactive desktop, with temporary `APPDATA` for its diagnostic log. The test keeps the window on-screen because WGC may black out off-monitor areas.
 
@@ -27,6 +31,8 @@ Use `resize` instead of `static` to send eight size/content stages over the same
 `video_send_queue_test.exe` feeds bursts into the production encoder-input queue and checks newest-frame replacement during the pacing wait, release of stale allocations, the frame-rate deadline, idle keepalive, interruptible stop and clean restart. This is sender pacing, not a two-second receive/jitter buffer; it cannot recover frames already dropped by WebRTC.
 
 `rtc_diagnostics_test.exe` verifies interval bitrate/FPS, encode/decode and packet/jitter-buffer delay, loss/freeze deltas, single-PC duplicate suppression, counter reset, idle intervals and disappearing/reappearing tracks. No server is required.
+
+`video_bitrate_test.exe` checks the 4000 Kbit/s default, 1000–10000 Kbit/s selections, conversion to bits/s and explicit client choice taking precedence over the legacy diagnostic environment variable. `source_picker_test.exe` also checks numeric entry, +/-1000 steps, bounds and cancellation for the bitrate field. To verify SDK publication, pass `selectedBitrateKbps` to `capture_wan_test` while setting a different `TS3STREAM_MAX_BITRATE`; the publisher log must show the explicit selection in `maxBitrate`, not the environment override.
 
 `delayed_audio_test.exe` checks the room metadata contract, no early output, copied PCM/order, bounded memory under overload, pause/reset/restart and interruptible shutdown without playing the queued tail. No audio device or server is used.
 

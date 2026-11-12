@@ -1349,12 +1349,13 @@ void StreamUi::beginCapture(const CaptureSource& source, const LiveKitToken& tok
     state->title = source.title;
     state->fps = source.fps > 0 ? source.fps : 30;
     state->autoFps = source.autoFps;
+    state->videoBitrateKbps = source.videoBitrateKbps;
     state->resolutionBounds = videoResolutionBounds(source.resolutionHeight);
     state->started = std::chrono::steady_clock::now();
     captureState_ = state;
     publishing_ = true;
-    diag::log("StreamUi: capture fps=%d auto=%d resolution=%dx%d", state->fps, state->autoFps ? 1 : 0,
-              state->resolutionBounds.width(), state->resolutionBounds.height());
+    diag::log("StreamUi: capture fps=%d auto=%d resolution=%dx%d bitrate_kbps=%d", state->fps, state->autoFps ? 1 : 0,
+              state->resolutionBounds.width(), state->resolutionBounds.height(), state->videoBitrateKbps);
 
     std::shared_ptr<media::LiveKitEngine> livekitEngine;
     if (token.url.isEmpty() || token.token.isEmpty()) {
@@ -1582,7 +1583,7 @@ void StreamUi::processVideoFrame(const std::shared_ptr<CaptureState>& state,
     if (state->livekit && state->livekit->isConnected()) {
         if (!state->livekitVideoReady.load()) {
             std::string error;
-            if (state->livekit->ensureVideo(scaledFrame.width, scaledFrame.height, state->fps, error)) {
+            if (state->livekit->ensureVideo(scaledFrame.width, scaledFrame.height, state->fps, error, state->videoBitrateKbps)) {
                 state->livekitVideoReady.store(true);
             } else if (!error.empty()) {
                 diag::log("LiveKit video setup failed: %s", error.c_str());
