@@ -8,6 +8,30 @@ TS3Stream server components. There are two common setups:
 
 The Windows TS3 client plugin is installed separately; see section 7.
 
+## Quick install (recommended)
+
+Run PowerShell **as Administrator** and execute:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1"
+```
+
+It installs LiveKit, the control API and optionally Caddy with TLS, writes all
+configuration, adds firewall rules, creates startup tasks and checks the control
+API health endpoint. The stock TS3 server is **not** installed or modified; the
+installer only checks that it is running.
+
+LAN/IP without TLS:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
+```
+
+Options: `-Domain`, `-ApiKey`, `-ApiSecret`, `-ClientKey`, `-Version`, `-NoTls`,
+`-NoServices`, `-SkipFirewall`, `-Yes`.
+
+The manual steps below remain available if you want full control.
+
 ## 1. Prepare directories
 
 Open PowerShell as Administrator:

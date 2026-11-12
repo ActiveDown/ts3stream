@@ -37,6 +37,13 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
+Or run it in one command (Bash process substitution keeps the interactive
+prompts working):
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+```
+
 The installer prompts for the domain and confirmation, then:
 
 - installs LiveKit and the `ts3stream-control` API;
@@ -70,15 +77,31 @@ Windows server: [`docs/install-windows.en.md`](docs/install-windows.en.md).
 
 ### Windows server
 
-There is no one-command installer for Windows yet; the step-by-step guide covers:
+Run PowerShell **as Administrator** and start the installer:
 
-- stock TS3 server on Windows;
-- LiveKit for Windows;
-- `ts3stream-control.exe`;
-- Windows Firewall rules;
-- optional Caddy TLS and NSSM services.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1"
+```
 
-See [`docs/install-windows.en.md`](docs/install-windows.en.md).
+The installer:
+
+- downloads LiveKit, the control API and (optionally) Caddy;
+- writes `livekit.yaml`, `start-*.cmd`, `service.json`;
+- adds Windows Firewall rules;
+- registers startup tasks for LiveKit, control API and Caddy;
+- starts the services and checks `/api/health`;
+- copies `service.json` into the local TS3 client profile when present.
+
+For LAN/IP without TLS:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
+```
+
+Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.2.1`.
+
+The stock TS3 server is installed separately; the installer only checks that it
+is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-windows.en.md).
 
 ### Windows client
 

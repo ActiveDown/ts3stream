@@ -37,6 +37,12 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
+Или одной командой (process substitution сохраняет интерактивные вопросы):
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+```
+
 Установщик спросит домен и подтверждение, затем:
 
 - установит LiveKit и `ts3stream-control` API;
@@ -70,15 +76,31 @@ Windows-сервер: [`docs/install-windows.ru.md`](docs/install-windows.ru.md)
 
 ### Windows-сервер
 
-Однокомандного установщика для Windows пока нет; пошаговая инструкция покрывает:
+Запустите PowerShell **от администратора** и выполните установщик:
 
-- стоковый TS3-сервер на Windows;
-- LiveKit для Windows;
-- `ts3stream-control.exe`;
-- правила Windows Firewall;
-- опциональный Caddy TLS и службы через NSSM.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1"
+```
 
-См. [`docs/install-windows.ru.md`](docs/install-windows.ru.md).
+Установщик:
+
+- скачает LiveKit, control API и (опционально) Caddy;
+- запишет `livekit.yaml`, `start-*.cmd`, `service.json`;
+- добавит правила Windows Firewall;
+- создаст задачи автозапуска для LiveKit, control API и Caddy;
+- запустит службы и проверит `/api/health`;
+- скопирует `service.json` в локальный профиль TS3, если он есть.
+
+Для LAN/IP без TLS:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
+```
+
+Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.2.1`.
+
+Стоковый TS3-сервер ставится отдельно; установщик только проверяет, что он
+запущен. Подробная ручная инструкция: [`docs/install-windows.ru.md`](docs/install-windows.ru.md).
 
 ### Windows-клиент
 

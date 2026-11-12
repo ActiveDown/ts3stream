@@ -20,6 +20,12 @@ less install-ts3stream.sh
 sudo bash install-ts3stream.sh
 ```
 
+Или одной командой (process substitution сохраняет интерактивные вопросы):
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh)
+```
+
 Установщик спросит публичное DNS-имя и подтверждение, затем поставит LiveKit,
 control API и Caddy, создаст systemd-службы, сгенерирует секреты, добавит
 правила UFW и выведет готовый `service.json` для Windows-клиентов.

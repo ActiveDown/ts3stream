@@ -8,6 +8,30 @@
 
 Плагин Windows-клиента ставится отдельно; см. раздел 7.
 
+## Быстрая установка (рекомендуется)
+
+Запустите PowerShell **от администратора** и выполните:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1"
+```
+
+Установщик поставит LiveKit, control API и опционально Caddy с TLS, запишет
+конфигурацию, добавит правила файрвола, создаст задачи автозапуска и проверит
+health control API. Стоковый TS3-сервер **не** устанавливается и не меняется;
+установщик только проверяет, что он запущен.
+
+LAN/IP без TLS:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
+```
+
+Опции: `-Domain`, `-ApiKey`, `-ApiSecret`, `-ClientKey`, `-Version`, `-NoTls`,
+`-NoServices`, `-SkipFirewall`, `-Yes`.
+
+Ручные шаги ниже остаются для полного контроля.
+
 ## 1. Подготовка каталогов
 
 Откройте PowerShell от администратора:
