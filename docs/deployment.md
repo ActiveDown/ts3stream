@@ -1,4 +1,8 @@
-﻿# Развёртывание на Linux
+# Развёртывание на Linux
+
+> Пошаговая установка с нуля: [`install-linux.ru.md`](install-linux.ru.md)
+> (English: [`install-linux.en.md`](install-linux.en.md)).
+> Установка на Windows-сервер: [`install-windows.ru.md`](install-windows.ru.md).
 
 ## Принцип
 
@@ -58,15 +62,15 @@ Control API хранит реестр активных публикаторов 
 1. Соберите Linux-бинарник control (на Windows):
 
 ```powershell
-cd service
+cd ts3stream\service
 $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
 go build -trimpath -ldflags '-s -w' -o ..\dist\linux\ts3stream-control .\cmd\control
 ```
 
 2. Скачайте `livekit-server` для linux/amd64 с релизов LiveKit и положите рядом
-   с `ts3stream-control` в `dist/linux/`.
+   с `ts3stream-control` в `ts3stream/dist/linux/`.
 
-3. Скопируйте `deploy/*` и оба бинарника на сервер, затем:
+3. Скопируйте `ts3stream/deploy/*` и оба бинарника на сервер, затем:
 
 ```bash
 sudo ./install.sh
@@ -138,4 +142,3 @@ DLL LiveKit при первом запуске копируются в `%APPDATA
 - [ ] В fullscreen панель участников показывает говорящих; «Скрыть»/«Выйти» работают.
 - [ ] Выход из TS3 не создаёт crash dump.
 - [ ] Сервисы переживают перезагрузку; логи настроены на ротацию.
-

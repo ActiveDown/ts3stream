@@ -16,12 +16,14 @@ rtc:
   # node_ip: 203.0.113.10
 
 turn:
-  enabled: true
-  domain: turn.example.com
-  tls_port: 5349
-  udp_port: 3478
-  cert_file: /etc/letsencrypt/live/turn.example.com/fullchain.pem
-  key_file: /etc/letsencrypt/live/turn.example.com/privkey.pem
+  # TURN is optional. Enable it after you obtain a certificate for the TURN
+  # domain; otherwise LiveKit will fail to start with missing cert paths.
+  enabled: false
+  # domain: turn.example.com
+  # tls_port: 5349
+  # udp_port: 3478
+  # cert_file: /etc/letsencrypt/live/turn.example.com/fullchain.pem
+  # key_file: /etc/letsencrypt/live/turn.example.com/privkey.pem
 
 keys:
   # Replace both values; they must match LIVEKIT_API_KEY/SECRET for control.

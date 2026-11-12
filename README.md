@@ -117,6 +117,11 @@ go build -trimpath -ldflags '-s -w' -o ..\dist\linux\ts3stream-control .\cmd\con
 
 See [`docs/deployment.md`](docs/deployment.md) for ports, config and systemd.
 
+Detailed step-by-step guides:
+
+- Linux: [`docs/install-linux.en.md`](docs/install-linux.en.md) · [`docs/install-linux.ru.md`](docs/install-linux.ru.md)
+- Windows server: [`docs/install-windows.en.md`](docs/install-windows.en.md) · [`docs/install-windows.ru.md`](docs/install-windows.ru.md)
+
 ## Repository layout
 
 ```

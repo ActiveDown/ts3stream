@@ -72,6 +72,11 @@ HTTPS-адрес control API и общий ключ, совпадающий с `
 Готовые шаблоны: `deploy/` (systemd, LiveKit YAML, Caddyfile, `install.sh`).
 Подробности — `docs/deployment.md`.
 
+Пошаговые инструкции:
+
+- Linux: [`docs/install-linux.ru.md`](docs/install-linux.ru.md) · [`docs/install-linux.en.md`](docs/install-linux.en.md)
+- Windows-сервер: [`docs/install-windows.ru.md`](docs/install-windows.ru.md) · [`docs/install-windows.en.md`](docs/install-windows.en.md)
+
 ## Структура
 
 ```
