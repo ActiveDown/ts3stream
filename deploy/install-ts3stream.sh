@@ -18,7 +18,7 @@
 set -euo pipefail
 
 REPO="${TS3STREAM_REPO:-ActiveDown/ts3stream}"
-VERSION="${TS3STREAM_VERSION:-}"
+CONTROL_VERSION="${TS3STREAM_VERSION:-}"
 DOMAIN=""
 API_KEY="ts3stream"
 API_SECRET=""
@@ -75,7 +75,7 @@ parse_args() {
             --api-key) API_KEY="${2:-}"; shift 2 ;;
             --api-secret) API_SECRET="${2:-}"; shift 2 ;;
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
-            --version) VERSION="${2:-}"; shift 2 ;;
+            --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
             --no-firewall) CONFIGURE_FIREWALL=0; shift ;;
@@ -136,7 +136,7 @@ ask_settings() {
         echo "  domain:       ${DOMAIN}"
         echo "  TLS/Caddy:    $([[ ${INSTALL_CADDY} -eq 1 ]] && echo yes || echo no)"
         echo "  firewall:     $([[ ${CONFIGURE_FIREWALL} -eq 1 ]] && echo UFW rules || echo manual)"
-        echo "  control tag:  ${VERSION:-latest}"
+        echo "  control tag:  ${CONTROL_VERSION:-latest}"
         echo
         read -r -p "Continue? [Y/n] " answer
         case "${answer}" in
@@ -173,8 +173,8 @@ create_users() {
 
 download_control() {
     local url
-    if [[ -n "${VERSION}" ]]; then
-        url="https://github.com/${REPO}/releases/download/${VERSION}/ts3stream-control-linux-amd64"
+    if [[ -n "${CONTROL_VERSION}" ]]; then
+        url="https://github.com/${REPO}/releases/download/${CONTROL_VERSION}/ts3stream-control-linux-amd64"
     else
         url="https://github.com/${REPO}/releases/latest/download/ts3stream-control-linux-amd64"
     fi
