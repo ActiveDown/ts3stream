@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -426,5 +427,56 @@ func TestTokenEndpointUnchanged(t *testing.T) {
 
 	if status, _ := api.do(t, http.MethodGet, "/api/token?room=room-a", "", testClientKey); status != http.StatusBadRequest {
 		t.Fatalf("token without identity = %d, want %d", status, http.StatusBadRequest)
+	}
+}
+
+func TestTokenIdentityPreservesPlus(t *testing.T) {
+	api := newTestAPI(t)
+	for _, tc := range []struct {
+		name, queryIdentity, identity string
+	}{
+		{"qt-literal-plus", "abc+def/ghi+jkl=", "abc+def/ghi+jkl="},
+		{"encoded-plus", "abc%2Bdef%2Fghi%2Bjkl%3D", "abc+def/ghi+jkl="},
+		{"viewer", "abc+def/ghi+jkl=-viewer-123", "abc+def/ghi+jkl=-viewer-123"},
+		{"leading-trailing-plus", "+abc+", "+abc+"},
+		{"no-plus", "abc/def=", "abc/def="},
+		{"encoded-space", "abc%20def", "abc def"},
+		{"encoded-percent", "abc%252Bdef", "abc%2Bdef"},
+	} {
+		for _, publish := range []string{"0", "1"} {
+			t.Run(tc.name+"/publish="+publish, func(t *testing.T) {
+				status, body := api.do(t, http.MethodGet,
+					"/api/token?room=room-a&identity="+tc.queryIdentity+"&name=Alice+Smith&publish="+publish,
+					"", testClientKey)
+				if status != http.StatusOK {
+					t.Fatalf("token status = %d, body = %s", status, body)
+				}
+				var response tokenResponse
+				if err := json.Unmarshal(body, &response); err != nil {
+					t.Fatal(err)
+				}
+				parts := strings.Split(response.Token, ".")
+				if len(parts) != 3 {
+					t.Fatal("invalid JWT format")
+				}
+				payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var claims struct {
+					Subject string `json:"sub"`
+					Name    string `json:"name"`
+				}
+				if err := json.Unmarshal(payload, &claims); err != nil {
+					t.Fatal(err)
+				}
+				if claims.Subject != tc.identity {
+					t.Errorf("JWT identity = %q, want %q", claims.Subject, tc.identity)
+				}
+				if claims.Name != "Alice Smith" {
+					t.Errorf("JWT name = %q, want Alice Smith", claims.Name)
+				}
+			})
+		}
 	}
 }

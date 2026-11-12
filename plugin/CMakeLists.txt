@@ -30,6 +30,7 @@ add_library(ts3stream_diag SHARED
     src/ui/frame_processor.cpp
     src/ui/control_client.cpp
     src/ui/stream_ui.cpp
+    src/ui/fullscreen_window.cpp
 )
 
 target_include_directories(ts3stream_diag PRIVATE
@@ -73,6 +74,36 @@ set_target_properties(ts3stream_diag PROPERTIES
 if (MSVC)
     target_compile_options(ts3stream_diag PRIVATE /W4 /permissive- /Zc:__cplusplus /utf-8)
     target_link_options(ts3stream_diag PRIVATE /INCREMENTAL:NO /DELAYLOAD:livekit.dll)
+endif()
+
+option(TS3STREAM_BUILD_UI_TESTS "Build interactive native fullscreen regression test" OFF)
+if (TS3STREAM_BUILD_UI_TESTS)
+    add_executable(fullscreen_window_test
+        tests/fullscreen_window_test.cpp
+        src/ui/fullscreen_window.cpp
+        src/ui/stream_panel.cpp
+    )
+    target_include_directories(fullscreen_window_test PRIVATE src)
+    target_link_libraries(fullscreen_window_test PRIVATE Qt5::Widgets user32)
+    target_compile_definitions(fullscreen_window_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if (MSVC)
+        target_compile_options(fullscreen_window_test PRIVATE /utf-8)
+    endif()
+    add_executable(stream_ended_test
+        tests/stream_ended_test.cpp
+        src/media/livekit_engine.cpp
+        src/log.cpp
+        src/ui/fullscreen_window.cpp
+        src/ui/stream_panel.cpp
+    )
+    target_include_directories(stream_ended_test PRIVATE src "${LIVEKIT_SDK_DIR}/include")
+    target_link_libraries(stream_ended_test PRIVATE Qt5::Widgets user32
+        "${LIVEKIT_SDK_DIR}/lib/livekit.lib" delayimp)
+    target_compile_definitions(stream_ended_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if (MSVC)
+        target_compile_options(stream_ended_test PRIVATE /utf-8)
+        target_link_options(stream_ended_test PRIVATE /DELAYLOAD:livekit.dll)
+    endif()
 endif()
 
 # Separate helper process for WASAPI process-loopback. It must not run inside

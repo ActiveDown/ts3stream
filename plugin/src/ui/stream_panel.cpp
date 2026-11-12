@@ -1,6 +1,7 @@
 #include "stream_panel.h"
 
 #include <QHBoxLayout>
+#include <QCloseEvent>
 #include <QLabel>
 #include <QPainter>
 #include <QResizeEvent>
@@ -123,12 +124,16 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
     titleColumn->addWidget(subtitle_);
 
     stats_ = makeLabel(QString(), QStringLiteral("ts3stream_stats"), header);
+    detachButton_ = makeToolButton(QStringLiteral("Открепить"),
+                                   QStringLiteral("Открыть стрим в отдельном окне"), header);
+    detachButton_->setObjectName(QStringLiteral("ts3stream_detach"));
     fullscreenButton_ = makeToolButton(QStringLiteral("⛶"), QStringLiteral("На весь экран"), header);
     closeButton_ = makeToolButton(QStringLiteral("✕"), QStringLiteral("Закрыть"), header);
 
     headerLayout->addWidget(liveBadge_);
     headerLayout->addLayout(titleColumn, 1);
     headerLayout->addWidget(stats_);
+    headerLayout->addWidget(detachButton_);
     headerLayout->addWidget(fullscreenButton_);
     headerLayout->addWidget(closeButton_);
 
@@ -193,6 +198,9 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
             onFullscreen_();
         }
     });
+    QObject::connect(detachButton_, &QToolButton::clicked, this, [this] {
+        if (onDetach_) onDetach_();
+    });
     QObject::connect(exitFullscreenButton_, &QToolButton::clicked, this, [this] {
         if (onFullscreen_) {
             onFullscreen_();
@@ -206,6 +214,7 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
 
 void StreamPanel::setTitle(const QString& title) {
     title_->setText(title);
+    setWindowTitle(title + QStringLiteral(" — TS3Stream"));
 }
 
 void StreamPanel::setSubtitle(const QString& subtitle) {
@@ -238,6 +247,23 @@ void StreamPanel::setOnClose(std::function<void()> callback) {
 
 void StreamPanel::setOnFullscreen(std::function<void()> callback) {
     onFullscreen_ = std::move(callback);
+}
+
+void StreamPanel::setOnDetach(std::function<void()> callback) {
+    onDetach_ = std::move(callback);
+}
+
+void StreamPanel::setDetachedMode(bool detached) {
+    detachButton_->setText(detached ? QStringLiteral("Встроить") : QStringLiteral("Открепить"));
+    detachButton_->setToolTip(detached ? QStringLiteral("Вернуть стрим в окно TeamSpeak")
+                                     : QStringLiteral("Открыть стрим в отдельном окне"));
+}
+
+void StreamPanel::closeEvent(QCloseEvent* event) {
+    // Native title-bar X / Alt+F4 must stop viewing just like our close button.
+    // StreamUi schedules deletion; do not leave a hidden viewer playing audio.
+    event->accept();
+    if (onClose_) onClose_();
 }
 
 void StreamPanel::setMembers(const std::vector<RoomMember>& members) {

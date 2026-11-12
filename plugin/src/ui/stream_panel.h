@@ -49,12 +49,15 @@ public:
     void setFrame(const QImage& frame);
     void setMembers(const std::vector<RoomMember>& members);
     void setFullscreenMode(bool fullscreen);
+    void setDetachedMode(bool detached);
 
     void setOnClose(std::function<void()> callback);
     void setOnFullscreen(std::function<void()> callback);
+    void setOnDetach(std::function<void()> callback);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
 
 private:
     void rebuildMembers(const std::vector<RoomMember>& members);
@@ -68,6 +71,7 @@ private:
     QLabel* stats_ = nullptr;
     QLabel* audio_ = nullptr;
     QToolButton* fullscreenButton_ = nullptr;
+    QToolButton* detachButton_ = nullptr;
     QToolButton* closeButton_ = nullptr;
     VideoCanvas* canvas_ = nullptr;
 
@@ -85,6 +89,7 @@ private:
 
     std::function<void()> onClose_;
     std::function<void()> onFullscreen_;
+    std::function<void()> onDetach_;
 };
 
 } // namespace ts3stream::ui

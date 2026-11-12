@@ -14,7 +14,9 @@ Discord-style screen and application streaming inside **stock TeamSpeak 3** on W
 - **One LiveKit room per TS3 channel**, red LIVE badges, in-client viewer.
 - **Three explicit ways to watch**: client context menu, client info button, LIVE badge popup. Row clicks only select the client.
 - **Viewing and publishing are independent**: starting a stream does not open the viewer; closing the viewer does not stop the stream.
-- **Fullscreen** on the TS3 window monitor, with a semi-transparent members bar and large controls.
+- **Detach / Embed** the viewer into a separate movable window while keeping TeamSpeak available.
+- **Fullscreen** on the viewer's current monitor, including a detached viewer, with a semi-transparent members bar and large controls.
+- **Automatic viewer close** when the publisher ends the stream, in embedded, detached and fullscreen modes.
 - **Crash-free TS3 shutdown**, including while publishing and watching.
 
 ## Quick install
@@ -65,7 +67,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Useful options: `--version v0.3.2` to pin the control API release, `--no-firewall`, `--help`.
+Useful options: `--version v0.3.3` to pin the control API release, `--no-firewall`, `--help`.
 
 If you only have a public IP and no domain:
 
@@ -124,7 +126,7 @@ For LAN/IP without TLS:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.2`.
+Useful options: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.3`.
 
 The stock TS3 server is installed separately; the installer only checks that it
 is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-windows.en.md).
@@ -132,7 +134,7 @@ is running. Detailed manual guide: [`docs/install-windows.en.md`](docs/install-w
 ### Windows client
 
 1. Close TeamSpeak 3.
-2. Install `ts3stream-0.3.2.ts3_plugin` with the TeamSpeak Package Installer.
+2. Install `ts3stream-0.3.3.ts3_plugin` with the TeamSpeak Package Installer.
 3. Start TS3 and connect to the server.
 
 No manual config is normally needed: the plugin reads the `[ts3stream]...[/ts3stream]`

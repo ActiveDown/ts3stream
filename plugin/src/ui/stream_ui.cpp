@@ -1,6 +1,7 @@
 #include "stream_ui.h"
 
 #include "stream_panel.h"
+#include "fullscreen_window.h"
 #include "../diag/widget_dump.h"
 #include "../log.h"
 #include "../media/window_enumerator.h"
@@ -526,7 +527,8 @@ void StreamUi::tryAutoConfigure() {
     });
 }
 
-void StreamUi::refreshLiveStreams() {    if (!initialized_ || !control_ || !connected_ || streamsRequestActive_) {
+void StreamUi::refreshLiveStreams() {
+    if (!initialized_ || !control_ || !connected_ || streamsRequestActive_) {
         return;
     }
     QString room;
@@ -539,7 +541,8 @@ void StreamUi::refreshLiveStreams() {    if (!initialized_ || !control_ || !conn
     }
 
     streamsRequestActive_ = true;
-    control_->fetchStreams(room, [this](bool ok, const QVector<ControlStream>& streams, const QString& error) {
+    const int viewerGeneration = viewerGeneration_;
+    control_->fetchStreams(room, [this, room, viewerGeneration](bool ok, const QVector<ControlStream>& streams, const QString& error) {
         streamsRequestActive_ = false;
         if (!initialized_) {
             return;
@@ -569,6 +572,15 @@ void StreamUi::refreshLiveStreams() {    if (!initialized_ || !control_ || !conn
             treeView_->viewport()->update();
         }
         updateWatchButton();
+        // Only a successful snapshot for this viewer's room can end playback.
+        // An old in-flight response must never close a newly selected stream.
+        if (viewerGeneration == viewerGeneration_ && viewerRoom_ == room &&
+            !viewerTargetIdentity_.isEmpty()) {
+            const bool stillLive = std::any_of(streams.begin(), streams.end(), [this](const ControlStream& stream) {
+                return stream.room == viewerRoom_ && stream.identity == viewerTargetIdentity_;
+            });
+            if (!stillLive) closeEndedViewer(viewerGeneration);
+        }
     });
 }
 
@@ -761,9 +773,6 @@ void StreamUi::initialize() {
     installLiveBadgeDelegate();
     ensureWatchButton();
 
-    auto* fullscreenShortcut = new QShortcut(QKeySequence(Qt::Key_F11), mainWindow_);
-    QObject::connect(fullscreenShortcut, &QShortcut::activated, this, [this] { toggleFullscreen(); });
-
     initialized_ = true;
     diag::log("StreamUi initialized: toolbar=%s infoFrame=%s serverTree=%s",
               toolBar_->metaObject()->className(),
@@ -907,10 +916,12 @@ void StreamUi::shutdown() {
     stopCapture(true);
     stopViewer(true);
 
-    if (fullscreen_ && panel_) {
+    if ((fullscreen_ || detached_) && panel_) {
+        panel_->setWindowState(Qt::WindowNoState);
         panel_->setParent(infoWrapper_);
         panel_->setWindowFlags(Qt::Widget);
         fullscreen_ = false;
+        detached_ = false;
     }
 
     // Do not delete TS3-owned Qt widgets or our timers during client shutdown:
@@ -1147,6 +1158,8 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
                                        .arg(QDateTime::currentMSecsSinceEpoch());
 
     const int generation = ++viewerGeneration_;
+    viewerRoom_ = room;
+    viewerTargetIdentity_ = targetIdentity;
     panel_->setTitle(QStringLiteral("Стрим: %1").arg(nickname));
     panel_->setSubtitle(QStringLiteral("Запрос токена…"));
     panel_->setLive(false);
@@ -1204,6 +1217,13 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
             if (renderer) {
                 renderer->push(samples, frames, channels);
             }
+        });
+
+        engine->setStreamEndedCallback([this, generation] {
+            // Never disconnect/destroy a room while executing its SDK event.
+            QMetaObject::invokeMethod(this, [this, generation] {
+                closeEndedViewer(generation);
+            }, Qt::QueuedConnection);
         });
 
         std::string connectError;
@@ -1605,6 +1625,8 @@ void StreamUi::stopCapture(bool forShutdown) {
 }
 
 void StreamUi::stopViewer(bool forShutdown) {
+    viewerRoom_.clear();
+    viewerTargetIdentity_.clear();
     ++viewerGeneration_;
     if (viewerState_) {
         viewerState_->alive.store(false);
@@ -1631,6 +1653,13 @@ void StreamUi::stopViewer(bool forShutdown) {
     }
 }
 
+void StreamUi::closeEndedViewer(int generation) {
+    if (!initialized_ || generation != viewerGeneration_ || viewerTargetIdentity_.isEmpty()) return;
+    diag::log("StreamUi: closing viewer because target stream ended");
+    stopViewer();
+    restoreInfoPanel();
+}
+
 void StreamUi::ensurePanel() {
     if (!infoFrame_) {
         infoFrame_ = findVisibleInfoFrame(mainWindow_);
@@ -1650,12 +1679,14 @@ void StreamUi::ensurePanel() {
             restoreInfoPanel();
         });
         panel_->setOnFullscreen([this] { toggleFullscreen(); });
+        panel_->setOnDetach([this] { toggleDetached(); });
+        // The shortcut follows the viewer when it becomes a top-level window.
+        auto* fullscreenShortcut = new QShortcut(QKeySequence(Qt::Key_F11), panel_);
+        QObject::connect(fullscreenShortcut, &QShortcut::activated, this, [this] { toggleFullscreen(); });
         panel_->installEventFilter(this);
     }
 
-    infoFrame_->hide();
-    panel_->setParent(infoWrapper_);
-    panel_->setWindowFlags(Qt::Widget);
+    infoFrame_->setVisible(detached_);
     refreshPanelGeometry();
     panel_->show();
     panel_->raise();
@@ -1670,6 +1701,9 @@ void StreamUi::restoreInfoPanel() {
         panel_->deleteLater();
         panel_ = nullptr;
     }
+    fullscreen_ = false;
+    detached_ = false;
+    detachedGeometry_.clear();
     if (infoFrame_) {
         infoFrame_->show();
     }
@@ -1677,7 +1711,7 @@ void StreamUi::restoreInfoPanel() {
 }
 
 void StreamUi::refreshPanelGeometry() {
-    if (!panel_ || !infoWrapper_ || fullscreen_) {
+    if (!panel_ || !infoWrapper_ || fullscreen_ || detached_) {
         return;
     }
     if (panel_->parentWidget() != infoWrapper_) {
@@ -1701,58 +1735,50 @@ void StreamUi::toggleFullscreen() {
     }
 
     if (!fullscreen_) {
-        // showFullScreen() on a freshly reparented widget otherwise falls back
-        // to the primary screen. Use the screen under the TS3 window's actual
-        // global position; panel_->screen() can be stale after earlier moves.
-        QScreen* targetScreen = nullptr;
-        if (mainWindow_) {
-            targetScreen = QGuiApplication::screenAt(mainWindow_->frameGeometry().center());
-            if (!targetScreen) {
-                targetScreen = mainWindow_->screen();
-            }
-        }
-        if (!targetScreen) {
-            targetScreen = panel_->screen();
-        }
-        if (!targetScreen) {
-            targetScreen = QGuiApplication::primaryScreen();
-        }
-        const QRect targetGeometry = targetScreen ? targetScreen->geometry() : QRect();
-        diag::log("StreamUi: fullscreen target main=%s panel=%s screen=%s geo=%d,%d %dx%d",
-                  mainWindow_ && mainWindow_->screen()
-                      ? mainWindow_->screen()->name().toUtf8().constData()
-                      : "null",
-                  panel_->screen() ? panel_->screen()->name().toUtf8().constData() : "null",
-                  targetScreen ? targetScreen->name().toUtf8().constData() : "unknown",
-                  targetGeometry.x(), targetGeometry.y(),
-                  targetGeometry.width(), targetGeometry.height());
-
+        if (detached_) detachedGeometry_ = panel_->saveGeometry();
         // Set the flag before reparenting/showing: the 100 ms geometry watchdog
         // must not pull the panel back into the InfoFrame during the transition.
         fullscreen_ = true;
-        panel_->setParent(nullptr);
-        panel_->setWindowFlags(Qt::Window);
-        panel_->winId();
-        if (targetScreen) {
-            if (QWindow* window = panel_->windowHandle()) {
-                window->setScreen(targetScreen);
-            }
-            panel_->setGeometry(targetGeometry);
-        }
-        panel_->showFullScreen();
-        panel_->raise();
         panel_->setFullscreenMode(true);
-        diag::log("StreamUi: fullscreen on screen=%s",
-                  targetScreen ? targetScreen->name().toUtf8().constData() : "unknown");
+        showFullscreenOnCurrentMonitor(panel_);
+        QTimer::singleShot(0, this, [this] {
+            if (!panel_ || !fullscreen_) return;
+            const QRect actual = panel_->frameGeometry();
+            diag::log("StreamUi: fullscreen actual screen=%s geo=%d,%d %dx%d detached=%d",
+                      panel_->screen() ? panel_->screen()->name().toUtf8().constData() : "unknown",
+                      actual.x(), actual.y(), actual.width(), actual.height(), detached_ ? 1 : 0);
+        });
     } else {
-        panel_->setParent(infoWrapper_);
-        panel_->setWindowFlags(Qt::Widget);
-        panel_->show();
         panel_->setFullscreenMode(false);
+        if (detached_) {
+            showDetachedWindow(panel_, detachedGeometry_);
+        } else {
+            restoreEmbeddedWindow(panel_, infoWrapper_);
+        }
         fullscreen_ = false;
         refreshPanelGeometry();
         diag::log("StreamUi: fullscreen off");
     }
+}
+
+void StreamUi::toggleDetached() {
+    if (!panel_ || !infoWrapper_) return;
+    if (fullscreen_) toggleFullscreen();
+    if (!detached_) {
+        // Block the geometry watchdog before reparenting the live viewer.
+        detached_ = true;
+        panel_->setDetachedMode(true);
+        showDetachedWindow(panel_);
+        if (infoFrame_) infoFrame_->show();
+    } else {
+        restoreEmbeddedWindow(panel_, infoWrapper_);
+        detached_ = false;
+        detachedGeometry_.clear();
+        panel_->setDetachedMode(false);
+        if (infoFrame_) infoFrame_->hide();
+        refreshPanelGeometry();
+    }
+    diag::log("StreamUi: viewer detached=%d", detached_ ? 1 : 0);
 }
 
 bool StreamUi::eventFilter(QObject* watched, QEvent* event) {

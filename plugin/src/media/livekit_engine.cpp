@@ -72,6 +72,17 @@ struct LiveKitEngine::Impl {
             }
         }
 
+        void onParticipantDisconnected(livekit::Room&, const livekit::ParticipantDisconnectedEvent& event) override {
+            if (event.participant) owner->handleStreamEnded(event.participant->identity());
+        }
+
+        void onTrackUnpublished(livekit::Room&, const livekit::TrackUnpublishedEvent& event) override {
+            if (event.participant && event.publication &&
+                event.publication->kind() == livekit::TrackKind::KIND_VIDEO) {
+                owner->handleStreamEnded(event.participant->identity());
+            }
+        }
+
         Impl* owner;
     };
 
@@ -102,6 +113,20 @@ struct LiveKitEngine::Impl {
 
     VideoFrameCallback videoCallback;
     AudioFrameCallback audioCallback;
+    StreamEndedCallback streamEndedCallback;
+
+    void handleStreamEnded(const std::string& identity) {
+        if (targetIdentity.empty() || identity != targetIdentity) return;
+        StreamEndedCallback callback;
+        {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            callback = std::move(streamEndedCallback);
+        }
+        if (callback) {
+            diag::log("LiveKit target stream ended: %s", identity.c_str());
+            callback();
+        }
+    }
 
     ~Impl() {
         std::lock_guard<std::mutex> lock(roomMutex);
@@ -122,6 +147,10 @@ struct LiveKitEngine::Impl {
     }
 
     void disconnectLocked() {
+        {
+            std::lock_guard<std::mutex> callbackLock(callbackMutex);
+            streamEndedCallback = nullptr;
+        }
         videoStarted.store(false);
         audioStarted.store(false);
 
@@ -256,6 +285,7 @@ void LiveKitEngine::disconnectForShutdown() {
         std::lock_guard<std::mutex> callbackLock(impl_->callbackMutex);
         impl_->videoCallback = nullptr;
         impl_->audioCallback = nullptr;
+        impl_->streamEndedCallback = nullptr;
     }
     leakOnDestroy_ = true;
     diag::log("LiveKit engine leaked for safe shutdown");
@@ -299,18 +329,21 @@ bool LiveKitEngine::connect(const std::string& url, const std::string& token, bo
     // clears them, so preserve them across the reconnect.
     VideoFrameCallback savedVideoCallback;
     AudioFrameCallback savedAudioCallback;
+    StreamEndedCallback savedStreamEndedCallback;
     {
         std::lock_guard<std::mutex> callbackLock(impl_->callbackMutex);
         savedVideoCallback = impl_->videoCallback;
         savedAudioCallback = impl_->audioCallback;
+        savedStreamEndedCallback = impl_->streamEndedCallback;
     }
 
     impl_->disconnectLocked();
 
-    if (savedVideoCallback || savedAudioCallback) {
+    if (savedVideoCallback || savedAudioCallback || savedStreamEndedCallback) {
         std::lock_guard<std::mutex> callbackLock(impl_->callbackMutex);
         impl_->videoCallback = std::move(savedVideoCallback);
         impl_->audioCallback = std::move(savedAudioCallback);
+        impl_->streamEndedCallback = std::move(savedStreamEndedCallback);
     }
 
     impl_->targetIdentity = targetIdentity;
@@ -365,6 +398,11 @@ void LiveKitEngine::setVideoFrameCallback(VideoFrameCallback callback) {
 void LiveKitEngine::setAudioFrameCallback(AudioFrameCallback callback) {
     std::lock_guard<std::mutex> lock(impl_->callbackMutex);
     impl_->audioCallback = std::move(callback);
+}
+
+void LiveKitEngine::setStreamEndedCallback(StreamEndedCallback callback) {
+    std::lock_guard<std::mutex> lock(impl_->callbackMutex);
+    impl_->streamEndedCallback = std::move(callback);
 }
 
 bool LiveKitEngine::ensureVideo(int width, int height, int fps, std::string& error) {

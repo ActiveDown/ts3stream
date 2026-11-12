@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -188,7 +189,12 @@ func (s *controlServer) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	room := strings.TrimSpace(query.Get("room"))
-	identity := strings.TrimSpace(query.Get("identity"))
+	// QUrlQuery sends literal '+' in TS3's base64 UID. Go's form-style
+	// query decoder treats it as a space, breaking the viewer's exact UID
+	// filter. Preserve raw '+' for identity while still decoding %2B once.
+	// Keep standard form decoding for other fields such as display names.
+	identityQuery, _ := url.ParseQuery(strings.ReplaceAll(r.URL.RawQuery, "+", "%2B"))
+	identity := strings.TrimSpace(identityQuery.Get("identity"))
 	name := strings.TrimSpace(query.Get("name"))
 	publish := query.Get("publish") == "1" || strings.EqualFold(query.Get("publish"), "true")
 

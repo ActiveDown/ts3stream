@@ -14,6 +14,7 @@ class LiveKitEngine {
 public:
     using VideoFrameCallback = std::function<void(int width, int height, const uint8_t* rgba, int stride, int64_t timestampUs)>;
     using AudioFrameCallback = std::function<void(const int16_t* samples, int frames, int channels, int sampleRate)>;
+    using StreamEndedCallback = std::function<void()>;
 
     LiveKitEngine();
     ~LiveKitEngine();
@@ -36,6 +37,8 @@ public:
 
     void setVideoFrameCallback(VideoFrameCallback callback);
     void setAudioFrameCallback(AudioFrameCallback callback);
+    // Called on an SDK thread; the UI must queue teardown onto its own thread.
+    void setStreamEndedCallback(StreamEndedCallback callback);
 
     bool ensureVideo(int width, int height, int fps, std::string& error);
     bool ensureAudio(std::string& error);

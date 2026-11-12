@@ -11,6 +11,7 @@
 #include "ts3_functions.h"
 
 #include <QImage>
+#include <QByteArray>
 #include <QObject>
 #include <QPointer>
 
@@ -78,9 +79,11 @@ private:
                            const media::CapturedVideoFrame& frame);
     void stopCapture(bool forShutdown = false);
     void stopViewer(bool forShutdown = false);
+    void closeEndedViewer(int generation);
     void ensurePanel();
     void restoreInfoPanel();
     void toggleFullscreen();
+    void toggleDetached();
     void refreshPanelGeometry();
     QWidget* findMainWindow() const;
     QWidget* findVisibleInfoFrame(QWidget* mainWindow) const;
@@ -131,6 +134,8 @@ private:
 
     QPointer<StreamPanel> panel_;
     bool fullscreen_ = false;
+    bool detached_ = false;
+    QByteArray detachedGeometry_;
     std::unique_ptr<media::WgcCapture> capture_;
     std::shared_ptr<CaptureState> captureState_;
     std::shared_ptr<CaptureState> viewerState_;
@@ -155,6 +160,8 @@ private:
     int activeChannelId_ = 0;
     int captureGeneration_ = 0;
     int viewerGeneration_ = 0;
+    QString viewerRoom_;
+    QString viewerTargetIdentity_;
     int autoConfigAttempts_ = 0;
     bool autoConfigInProgress_ = false;
     bool autoConfigDone_ = false;
