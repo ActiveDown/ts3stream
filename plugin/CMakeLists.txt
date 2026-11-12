@@ -26,6 +26,8 @@ add_library(ts3stream_diag SHARED
     src/media/livekit_engine.cpp
     src/ui/stream_panel.cpp
     src/ui/live_badge_delegate.cpp
+    src/ui/live_stream_menu.cpp
+    src/ui/active_streams_button.cpp
     src/ui/source_picker.cpp
     src/ui/frame_processor.cpp
     src/ui/control_client.cpp
@@ -78,6 +80,19 @@ endif()
 
 option(TS3STREAM_BUILD_UI_TESTS "Build interactive native fullscreen regression test" OFF)
 if (TS3STREAM_BUILD_UI_TESTS)
+    add_executable(viewer_controls_test tests/viewer_controls_test.cpp src/ui/stream_panel.cpp
+        src/ui/active_streams_button.cpp src/ui/live_badge_delegate.cpp)
+    target_include_directories(viewer_controls_test PRIVATE src)
+    target_link_libraries(viewer_controls_test PRIVATE Qt5::Widgets)
+    if (MSVC)
+        target_compile_options(viewer_controls_test PRIVATE /utf-8)
+    endif()
+    add_executable(live_stream_menu_test tests/live_stream_menu_test.cpp src/ui/live_stream_menu.cpp)
+    target_include_directories(live_stream_menu_test PRIVATE src)
+    target_link_libraries(live_stream_menu_test PRIVATE Qt5::Widgets)
+    if (MSVC)
+        target_compile_options(live_stream_menu_test PRIVATE /utf-8)
+    endif()
     add_executable(fullscreen_window_test
         tests/fullscreen_window_test.cpp
         src/ui/fullscreen_window.cpp

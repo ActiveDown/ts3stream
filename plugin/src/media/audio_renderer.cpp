@@ -1,4 +1,5 @@
 #include "audio_renderer.h"
+#include "playback_gain.h"
 
 #include "../log.h"
 
@@ -34,6 +35,7 @@ struct AudioRenderer::Impl {
 
     std::thread thread;
     std::atomic<bool> running{false};
+    std::atomic<int> volumePercent{100};
 
     std::mutex mutex;
     std::condition_variable cv;
@@ -79,8 +81,9 @@ struct AudioRenderer::Impl {
         std::lock_guard<std::mutex> lock(mutex);
         const size_t wanted = static_cast<size_t>(kBufferFrames) * kOutputChannels;
         size_t written = 0;
+        const int gain = volumePercent.load();
         while (written < wanted && !queue.empty()) {
-            buffer[written++] = queue.front();
+            buffer[written++] = applyPlaybackGain(queue.front(), gain);
             queue.pop_front();
         }
     }
@@ -168,6 +171,10 @@ bool AudioRenderer::start(int sampleRate, int channels) {
 
 void AudioRenderer::stop() {
     impl_->stop();
+}
+
+void AudioRenderer::setVolume(int percent) {
+    impl_->volumePercent.store(std::clamp(percent, 0, 100));
 }
 
 void AudioRenderer::push(const int16_t* samples, int frames, int channels) {

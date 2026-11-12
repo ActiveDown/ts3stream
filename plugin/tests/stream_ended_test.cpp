@@ -18,7 +18,8 @@
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
-    if (argc != 3) return 2;
+    if (argc != 3 && argc != 4) return 2;
+    const bool staticSource = argc == 4 && std::string(argv[3]) == "static";
     QFile file(QString::fromLocal8Bit(argv[1]));
     if (!file.open(QIODevice::ReadOnly)) return 2;
     const auto config = QJsonDocument::fromJson(file.readAll()).object();
@@ -53,13 +54,30 @@ int main(int argc, char** argv) {
             }
         }, Qt::QueuedConnection);
     });
-    if (!viewer.connect(value("url"), value("viewerToken"), true, error, value("targetIdentity")) ||
-        !publisher.ensureVideo(640, 360, 30, error)) {
+    if (!publisher.ensureVideo(640, 360, 30, error)) {
         std::fprintf(stderr, "viewer/video setup: %s\n", error.c_str());
         return 4;
     }
     QElapsedTimer clock;
     clock.start();
+    auto sendFrame = [&] {
+        ts3stream::media::CapturedVideoFrame frame;
+        frame.width = 640;
+        frame.height = 360;
+        frame.stride = 640 * 4;
+        frame.timestampUs = clock.nsecsElapsed() / 1000;
+        frame.bgra.assign(640 * 360 * 4, 128);
+        publisher.pushVideo(std::move(frame));
+    };
+    if (staticSource) sendFrame();
+    // Late subscriber to an unchanged WGC window: only ONE source frame is
+    // ever supplied, before the viewer joins. No repaint may be required.
+    QTimer::singleShot(staticSource ? 1500 : 0, &app, [&] {
+        if (!viewer.connect(value("url"), value("viewerToken"), true, error, value("targetIdentity"))) {
+            std::fprintf(stderr, "viewer connect: %s\n", error.c_str());
+            app.exit(4);
+        }
+    });
     qint64 targetStoppedAt = 0;
     int phase = 0;
     QTimer timer;
@@ -69,15 +87,7 @@ int main(int argc, char** argv) {
             app.exit(5);
             return;
         }
-        if (phase < 2) {
-            ts3stream::media::CapturedVideoFrame frame;
-            frame.width = 640;
-            frame.height = 360;
-            frame.stride = 640 * 4;
-            frame.timestampUs = clock.nsecsElapsed() / 1000;
-            frame.bgra.assign(640 * 360 * 4, 128);
-            publisher.pushVideo(std::move(frame));
-        }
+        if (phase < 2 && !staticSource) sendFrame();
         if (phase == 0 && frames.load() > 0) {
             other.disconnect();
             targetStoppedAt = clock.elapsed();

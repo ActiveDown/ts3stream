@@ -17,6 +17,7 @@ public:
 
     bool start(int sampleRate, int channels);
     void stop();
+    void setVolume(int percent);
 
     void push(const int16_t* samples, int frames, int channels);
 

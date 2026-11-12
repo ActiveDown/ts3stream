@@ -2,6 +2,8 @@
 
 #include "stream_panel.h"
 #include "fullscreen_window.h"
+#include "live_stream_menu.h"
+#include "active_streams_button.h"
 #include "../diag/widget_dump.h"
 #include "../log.h"
 #include "../media/window_enumerator.h"
@@ -542,7 +544,7 @@ void StreamUi::refreshLiveStreams() {
 
     streamsRequestActive_ = true;
     const int viewerGeneration = viewerGeneration_;
-    control_->fetchStreams(room, [this, room, viewerGeneration](bool ok, const QVector<ControlStream>& streams, const QString& error) {
+    control_->fetchStreams({}, [this, room, serverUid, viewerGeneration](bool ok, const QVector<ControlStream>& streams, const QString& error) {
         streamsRequestActive_ = false;
         if (!initialized_) {
             return;
@@ -552,9 +554,14 @@ void StreamUi::refreshLiveStreams() {
             return;
         }
 
+        QString currentRoom, currentServer, currentIdentity, currentNickname;
+        int currentChannel = 0;
+        if (!connected_ || !roomContext(currentRoom, currentServer, currentChannel, currentIdentity, currentNickname) ||
+            currentServer != serverUid || currentRoom != room) return;
         QHash<QString, LiveStreamInfo> byNickname;
+        QVector<LiveStreamInfo> available;
         for (const ControlStream& stream : streams) {
-            if (stream.nickname.isEmpty()) {
+            if (stream.nickname.isEmpty() || stream.serverUid != serverUid) {
                 continue;
             }
             LiveStreamInfo info;
@@ -562,8 +569,13 @@ void StreamUi::refreshLiveStreams() {
             info.identity = stream.identity;
             info.nickname = stream.nickname;
             info.channelId = stream.channelId;
-            byNickname.insert(stream.nickname, info);
+            available.push_back(info);
+            if (stream.room == room) byNickname.insert(stream.nickname, info);
         }
+        if (activeStreamsButton_) activeStreamsButton_->setStreams(available);
+        if (activeStreamsAction_) activeStreamsAction_->setVisible(!available.isEmpty());
+        streamListHandler_ = ts3_.getCurrentServerConnectionHandlerID
+                                 ? ts3_.getCurrentServerConnectionHandlerID() : 0;
         liveStreams_ = byNickname;
         if (liveDelegate_) {
             liveDelegate_->setStreams(liveStreams_);
@@ -574,7 +586,7 @@ void StreamUi::refreshLiveStreams() {
         updateWatchButton();
         // Only a successful snapshot for this viewer's room can end playback.
         // An old in-flight response must never close a newly selected stream.
-        if (viewerGeneration == viewerGeneration_ && viewerRoom_ == room &&
+        if (viewerGeneration == viewerGeneration_ &&
             !viewerTargetIdentity_.isEmpty()) {
             const bool stillLive = std::any_of(streams.begin(), streams.end(), [this](const ControlStream& stream) {
                 return stream.room == viewerRoom_ && stream.identity == viewerTargetIdentity_;
@@ -716,6 +728,13 @@ void StreamUi::initialize() {
             diag::log("StreamUi: button appended to toolbar");
         }
         streamButton_->show();
+        activeStreamsButton_ = new ActiveStreamsButton(toolBar_);
+        activeStreamsButton_->setOnWatch([this](LiveStreamInfo stream) {
+            startViewerForRoom(stream.room, stream.identity, stream.nickname);
+        });
+        activeStreamsAction_ = beforeAction ? toolBar_->insertWidget(beforeAction, activeStreamsButton_)
+                                           : toolBar_->addWidget(activeStreamsButton_);
+        activeStreamsAction_->setVisible(false);
     }
     diag::log("StreamUi: button added geometry=%d,%d %dx%d visible=%d toolbarActions=%lld",
               streamButton_->x(), streamButton_->y(), streamButton_->width(), streamButton_->height(),
@@ -943,6 +962,10 @@ void StreamUi::shutdown() {
         streamButton_->hide();
         streamButton_ = nullptr;
     }
+    if (activeStreamsAction_) activeStreamsAction_->setVisible(false);
+    if (activeStreamsButton_) activeStreamsButton_->hide();
+    activeStreamsAction_ = nullptr;
+    activeStreamsButton_ = nullptr;
     streamMenu_ = nullptr;
     infoFrame_ = nullptr;
     infoWrapper_ = nullptr;
@@ -1009,13 +1032,18 @@ void StreamUi::updateStreamButtonState() {
     if (stopAction_) {
         stopAction_->setEnabled(publishing_);
     }
+    if ((!connected || activeHandler != streamListHandler_) && activeStreamsAction_ &&
+        activeStreamsAction_->isVisible()) {
+        activeStreamsAction_->setVisible(false);
+        if (activeStreamsButton_) activeStreamsButton_->setStreams({});
+    }
 
     if (connected_ && !connected) {
         if (captureState_) {
             diag::log("StreamUi: disconnected from server, stopping stream");
             stopCapture(false);
         }
-        if (viewerState_) {
+        if (viewerState_ || !viewerTargetIdentity_.isEmpty()) {
             diag::log("StreamUi: disconnected from server, closing viewer");
             stopViewer(false);
             restoreInfoPanel();
@@ -1071,6 +1099,7 @@ void StreamUi::startViewer() {
 
     auto engine = std::make_shared<media::LiveKitEngine>();
     auto renderer = std::make_shared<media::AudioRenderer>();
+    renderer->setVolume(playbackMuted_ ? 0 : playbackVolume_);
     if (renderer->start(48000, 2)) {
         audioRenderer_ = renderer;
     } else {
@@ -1127,7 +1156,8 @@ void StreamUi::startViewerForStream(const ControlStream& stream) {
     startViewerForRoom(stream.room, stream.identity, stream.nickname);
 }
 
-void StreamUi::startViewerForRoom(const QString& room, const QString& targetIdentity, const QString& nickname) {
+void StreamUi::startViewerForRoom(QString room, QString targetIdentity, QString nickname) {
+    if (!initialized_ || !connected_) return;
     if (!control_) {
         diag::log("StreamUi: viewer requested without control client");
         return;
@@ -1138,6 +1168,14 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
         return;
     }
 
+    if (panel_ && viewerRoom_ == room && viewerTargetIdentity_ == targetIdentity &&
+        viewerLivekit_ && viewerLivekit_->isConnected()) {
+        if (panel_->isMinimized()) panel_->showNormal();
+        panel_->raise();
+        panel_->window()->activateWindow();
+        diag::log("StreamUi: existing viewer raised (detached=%d)", detached_ ? 1 : 0);
+        return;
+    }
     stopViewer();
     ensurePanel();
     if (!panel_) {
@@ -1192,6 +1230,7 @@ void StreamUi::startViewerForRoom(const QString& room, const QString& targetIden
 
         auto engine = std::make_shared<media::LiveKitEngine>();
         auto renderer = std::make_shared<media::AudioRenderer>();
+        renderer->setVolume(playbackMuted_ ? 0 : playbackVolume_);
         if (renderer->start(48000, 2)) {
             audioRenderer_ = renderer;
         } else {
@@ -1680,6 +1719,12 @@ void StreamUi::ensurePanel() {
         });
         panel_->setOnFullscreen([this] { toggleFullscreen(); });
         panel_->setOnDetach([this] { toggleDetached(); });
+        panel_->setPlaybackAudio(playbackVolume_, playbackMuted_);
+        panel_->setOnPlaybackAudioChanged([this](int volume, bool muted) {
+            playbackVolume_ = volume;
+            playbackMuted_ = muted;
+            if (audioRenderer_) audioRenderer_->setVolume(muted ? 0 : volume);
+        });
         // The shortcut follows the viewer when it becomes a top-level window.
         auto* fullscreenShortcut = new QShortcut(QKeySequence(Qt::Key_F11), panel_);
         QObject::connect(fullscreenShortcut, &QShortcut::activated, this, [this] { toggleFullscreen(); });
@@ -1791,17 +1836,12 @@ bool StreamUi::eventFilter(QObject* watched, QEvent* event) {
                 const QString nickname = rowIndex.data(Qt::DisplayRole).toString().trimmed();
                 const auto it = liveStreams_.constFind(nickname);
                 const QRect rowRect = treeView_->visualRect(rowIndex);
-                const bool inBadgeZone = mouse->pos().x() >= treeViewport_->width() - 56 &&
-                                         mouse->pos().y() >= rowRect.top() - 2 &&
-                                         mouse->pos().y() <= rowRect.bottom() + 2;
+                const bool inBadgeZone = liveBadgeRect(rowRect, treeViewport_->rect()).contains(mouse->pos());
                 if (it != liveStreams_.constEnd() && inBadgeZone) {
                     diag::log("StreamUi: LIVE badge clicked: %s", nickname.toUtf8().constData());
-                    QMenu menu(treeView_);
-                    QAction* watch = menu.addAction(
-                        QStringLiteral("▶  Смотреть стрим — %1").arg(nickname));
-                    if (menu.exec(mouse->globalPos()) == watch) {
-                        startViewerForRoom(it.value().room, it.value().identity, it.value().nickname);
-                    }
+                    popupLiveStreamMenu(treeView_, it.value(), mouse->globalPos(), [this](LiveStreamInfo stream) {
+                        startViewerForRoom(stream.room, stream.identity, stream.nickname);
+                    });
                     return true;
                 }
             }

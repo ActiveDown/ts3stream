@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -219,11 +220,16 @@ struct LiveKitEngine::Impl {
 
     void videoSenderLoop(std::shared_ptr<livekit::VideoSource> source, int width, int height) {
         int sent = 0;
+        std::unique_ptr<livekit::VideoFrame> latestFrame;
+        int64_t lastTimestampUs = 0;
         while (!videoSenderStop.load()) {
             std::shared_ptr<CapturedVideoFrame> frame;
             {
                 std::unique_lock<std::mutex> lock(videoQueueMutex);
-                videoQueueCv.wait(lock, [this] {
+                // WGC only supplies frames when the captured content changes.
+                // Feed the encoder while idle so late subscribers can receive
+                // a requested keyframe without waiting for a window repaint.
+                videoQueueCv.wait_for(lock, std::chrono::milliseconds(250), [this] {
                     return videoSenderStop.load() || pendingVideo != nullptr;
                 });
                 if (videoSenderStop.load()) {
@@ -233,25 +239,30 @@ struct LiveKitEngine::Impl {
                 pendingVideo.reset();
             }
 
-            if (!frame || !source) {
+            if (!source) {
                 continue;
             }
-            if (frame->width != width || frame->height != height) {
+            if (frame && (frame->width != width || frame->height != height)) {
                 continue;
             }
 
             try {
-                const int rowBytes = frame->width * 4;
-                std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * frame->height);
-                for (int y = 0; y < frame->height; ++y) {
-                    std::memcpy(pixels.data() + static_cast<size_t>(y) * rowBytes,
-                                frame->bgra.data() + static_cast<size_t>(y) * frame->stride,
-                                rowBytes);
+                if (frame) {
+                    const int rowBytes = frame->width * 4;
+                    std::vector<uint8_t> pixels(static_cast<size_t>(rowBytes) * frame->height);
+                    for (int y = 0; y < frame->height; ++y) {
+                        std::memcpy(pixels.data() + static_cast<size_t>(y) * rowBytes,
+                                    frame->bgra.data() + static_cast<size_t>(y) * frame->stride,
+                                    rowBytes);
+                    }
+                    latestFrame = std::make_unique<livekit::VideoFrame>(frame->width, frame->height,
+                        livekit::VideoBufferType::BGRA, std::move(pixels));
                 }
-
-                livekit::VideoFrame videoFrame(frame->width, frame->height,
-                                               livekit::VideoBufferType::BGRA, std::move(pixels));
-                source->captureFrame(videoFrame, frame->timestampUs,
+                if (!latestFrame) continue;
+                const int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                lastTimestampUs = std::max(nowUs, lastTimestampUs + 1);
+                source->captureFrame(*latestFrame, lastTimestampUs,
                                      livekit::VideoRotation::VIDEO_ROTATION_0);
 
                 if ((sent % 30) == 0) {

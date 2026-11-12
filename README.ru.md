@@ -12,7 +12,8 @@
 - **30 / 60 / Авто FPS**, захват 1080p, адаптивный H.264 до 12 Мбит/с.
 - **Звук приложения или системы** через WASAPI process loopback; звук TeamSpeak исключён, при втором TS3-клиенте звук отключается (fail closed).
 - **Комната LiveKit на каждый канал TS3**, красные LIVE-бейджи, встроенный просмотр.
-- **Три явных способа смотреть**: контекстное меню клиента, кнопка в панели клиента, popup по LIVE-бейджу. Клик по строке только выделяет клиента.
+- **Явные способы смотреть**: контекстное меню клиента, кнопка в панели клиента, popup по LIVE-бейджу или меню **«Идущие стримы (N)»** в тулбаре. Клик по строке только выделяет клиента.
+- **Mute и громкость 0–100%** во всех режимах просмотра, независимо от голосов TS3 и исходящей трансляции.
 - **Просмотр и публикация независимы**: старт стрима не открывает viewer, закрытие viewer не останавливает стрим.
 - **«Открепить» / «Встроить»**: отдельное переносимое окно стрима, пока TeamSpeak остаётся доступным.
 - **Fullscreen** на текущем мониторе просмотра, включая откреплённое окно, полупрозрачная панель участников и крупные кнопки.
@@ -67,7 +68,7 @@ sudo bash install-linux.sh --domain stream.example.com --yes
 sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
-Полезные опции: `--version v0.3.3` — зафиксировать релиз control API, `--no-firewall`, `--help`.
+Полезные опции: `--version v0.3.4` — зафиксировать релиз control API, `--no-firewall`, `--help`.
 
 Если есть только публичный IP и нет домена:
 
@@ -126,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.ps1 -OutFile $env:TEMP\install-ts3stream.ps1; & $env:TEMP\install-ts3stream.ps1 -Domain 192.168.1.50 -NoTls -Yes"
 ```
 
-Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.3`.
+Опции: `-Domain`, `-NoTls`, `-NoServices`, `-SkipFirewall`, `-Version v0.3.4`.
 
 Стоковый TS3-сервер ставится отдельно; установщик только проверяет, что он
 запущен. Подробная ручная инструкция: [`docs/install-windows.ru.md`](docs/install-windows.ru.md).
@@ -134,7 +135,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubus
 ### Windows-клиент
 
 1. Закройте TeamSpeak 3.
-2. Установите `ts3stream-0.3.3.ts3_plugin` через TeamSpeak Package Installer.
+2. Установите `ts3stream-0.3.4.ts3_plugin` через TeamSpeak Package Installer.
 3. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно: плагин читает маркер `[ts3stream]...[/ts3stream]`

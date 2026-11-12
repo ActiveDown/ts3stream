@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QModelIndex>
 #include <QPoint>
+#include <QRect>
 #include <QPointer>
 #include <QSize>
 #include <QString>
@@ -36,6 +37,7 @@ private:
 };
 
 // Returns true and fills *out when the item under viewportPos is a live streamer.
+QRect liveBadgeRect(const QRect& rowRect, const QRect& viewportRect);
 bool liveStreamAt(QTreeView* view, const QPoint& viewportPos, LiveStreamInfo* out);
 
 } // namespace ts3stream::ui

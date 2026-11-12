@@ -25,6 +25,13 @@ QString liveNickname(const QModelIndex& index) {
 
 } // namespace
 
+QRect liveBadgeRect(const QRect& rowRect, const QRect& viewportRect) {
+    const QRect visible = rowRect.intersected(viewportRect);
+    if (visible.width() < kBadgeWidth + 2 * kBadgeRightMargin || visible.height() < kBadgeHeight) return {};
+    return QRect(visible.right() - kBadgeRightMargin - kBadgeWidth + 1,
+                 rowRect.center().y() - kBadgeHeight / 2, kBadgeWidth, kBadgeHeight);
+}
+
 LiveBadgeDelegate::LiveBadgeDelegate(QAbstractItemDelegate* inner, QObject* parent)
     : QStyledItemDelegate(parent), inner_(inner) {}
 
@@ -52,15 +59,10 @@ void LiveBadgeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         return;
     }
 
-    if (option.rect.width() < kBadgeWidth + 2 * kBadgeRightMargin ||
-        option.rect.height() < kBadgeHeight) {
-        return;
-    }
-
-    const QRect badgeRect(option.rect.right() - kBadgeRightMargin - kBadgeWidth,
-                          option.rect.center().y() - kBadgeHeight / 2,
-                          kBadgeWidth,
-                          kBadgeHeight);
+    const auto* view = qobject_cast<const QTreeView*>(parent());
+    const QRect visibleRect = view ? view->viewport()->rect() : option.rect;
+    const QRect badgeRect = liveBadgeRect(option.rect, visibleRect);
+    if (badgeRect.isEmpty()) return;
 
     painter->save();
     painter->setClipRect(option.rect, Qt::IntersectClip);

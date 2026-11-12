@@ -34,6 +34,7 @@ class QWidget;
 namespace ts3stream::ui {
 
 class StreamPanel;
+class ActiveStreamsButton;
 
 class StreamUi : public QObject {
 public:
@@ -62,7 +63,7 @@ private:
                       int channelId, const QString& serverUid);
     void startViewer();
     void startViewerForStream(const ControlStream& stream);
-    void startViewerForRoom(const QString& room, const QString& targetIdentity, const QString& nickname);
+    void startViewerForRoom(QString room, QString targetIdentity, QString nickname);
     bool roomContext(QString& room, QString& serverUid, int& channelId,
                      QString& identity, QString& nickname) const;
     bool roomForChannel(uint64 serverConnectionHandlerID, int channelId,
@@ -125,6 +126,9 @@ private:
     QPointer<QWidget> mainWindow_;
     QPointer<QToolBar> toolBar_;
     QPointer<QToolButton> streamButton_;
+    QPointer<ActiveStreamsButton> activeStreamsButton_;
+    QPointer<QAction> activeStreamsAction_;
+    uint64 streamListHandler_ = 0;
     QPointer<QMenu> streamMenu_;
     QPointer<QAction> startAction_;
     QPointer<QAction> stopAction_;
@@ -145,6 +149,8 @@ private:
     std::shared_ptr<media::LiveKitEngine> livekit_;
     std::shared_ptr<media::LiveKitEngine> viewerLivekit_;
     std::shared_ptr<media::AudioRenderer> audioRenderer_;
+    int playbackVolume_ = 100;
+    bool playbackMuted_ = false;
     QTimer* watchdog_ = nullptr;
     QTimer* panelTimer_ = nullptr;
     QTimer* membersTimer_ = nullptr;

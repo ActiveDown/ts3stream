@@ -6,6 +6,8 @@
 #include <QPainter>
 #include <QResizeEvent>
 #include <QToolButton>
+#include <QSlider>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 namespace ts3stream::ui {
@@ -150,6 +152,43 @@ StreamPanel::StreamPanel(QWidget* parent) : QWidget(parent) {
     audio_ = makeLabel(QStringLiteral("Звук: не выбран"), QStringLiteral("ts3stream_audio"), footer);
     footerLayout->addWidget(audio_, 1);
 
+    // One control widget follows the viewer into fullscreen, independently
+    // of the members bar so muting is still available when members are hidden.
+    audioControls_ = new QWidget(footer);
+    audioControls_->setObjectName(QStringLiteral("ts3stream_playback_audio"));
+    audioControls_->setAttribute(Qt::WA_StyledBackground, true);
+    audioControls_->setStyleSheet(QStringLiteral(
+        "QWidget#ts3stream_playback_audio { background: rgba(24,24,24,210); border-radius: 5px; }"
+        "QLabel { color: #eeeeee; }"));
+    auto* audioLayout = new QHBoxLayout(audioControls_);
+    audioLayout->setContentsMargins(8, 3, 8, 3);
+    audioLayout->setSpacing(6);
+    muteButton_ = makeToolButton(QStringLiteral("Звук"), QStringLiteral("Выключить звук стрима"), audioControls_);
+    muteButton_->setObjectName(QStringLiteral("ts3stream_mute"));
+    muteButton_->setCheckable(true);
+    muteButton_->setMinimumWidth(94);
+    volumeSlider_ = new QSlider(Qt::Horizontal, audioControls_);
+    volumeSlider_->setObjectName(QStringLiteral("ts3stream_volume"));
+    volumeSlider_->setRange(0, 100);
+    volumeSlider_->setValue(100);
+    volumeSlider_->setFixedWidth(120);
+    volumeSlider_->setToolTip(QStringLiteral("Громкость стрима (не влияет на голоса TeamSpeak)"));
+    volumeSlider_->setAccessibleName(QStringLiteral("Громкость стрима"));
+    volumeLabel_ = new QLabel(QStringLiteral("100%"), audioControls_);
+    volumeLabel_->setMinimumWidth(38);
+    audioLayout->addWidget(muteButton_);
+    audioLayout->addWidget(volumeSlider_);
+    audioLayout->addWidget(volumeLabel_);
+    footerLayout->addWidget(audioControls_);
+    QObject::connect(muteButton_, &QToolButton::toggled, this, [this](bool muted) {
+        setPlaybackAudio(volumePercent_, muted);
+        if (onPlaybackAudioChanged_) onPlaybackAudioChanged_(volumePercent_, muted_);
+    });
+    QObject::connect(volumeSlider_, &QSlider::valueChanged, this, [this](int volume) {
+        setPlaybackAudio(volume, muted_);
+        if (onPlaybackAudioChanged_) onPlaybackAudioChanged_(volumePercent_, muted_);
+    });
+
     root->addWidget(header);
     root->addWidget(canvas_, 1);
     root->addWidget(footer);
@@ -253,6 +292,23 @@ void StreamPanel::setOnDetach(std::function<void()> callback) {
     onDetach_ = std::move(callback);
 }
 
+void StreamPanel::setOnPlaybackAudioChanged(std::function<void(int, bool)> callback) {
+    onPlaybackAudioChanged_ = std::move(callback);
+}
+
+void StreamPanel::setPlaybackAudio(int volumePercent, bool muted) {
+    volumePercent_ = qBound(0, volumePercent, 100);
+    muted_ = muted;
+    const QSignalBlocker muteBlocker(muteButton_);
+    const QSignalBlocker volumeBlocker(volumeSlider_);
+    muteButton_->setChecked(muted);
+    muteButton_->setText(muted ? QStringLiteral("Без звука") : QStringLiteral("Звук"));
+    muteButton_->setToolTip(muted ? QStringLiteral("Включить звук стрима")
+                                 : QStringLiteral("Выключить звук стрима"));
+    volumeSlider_->setValue(volumePercent_);
+    volumeLabel_->setText(QStringLiteral("%1%").arg(volumePercent_));
+}
+
 void StreamPanel::setDetachedMode(bool detached) {
     detachButton_->setText(detached ? QStringLiteral("Встроить") : QStringLiteral("Открепить"));
     detachButton_->setToolTip(detached ? QStringLiteral("Вернуть стрим в окно TeamSpeak")
@@ -308,6 +364,14 @@ void StreamPanel::rebuildMembers(const std::vector<RoomMember>& members) {
 
 void StreamPanel::setFullscreenMode(bool fullscreen) {
     fullscreenMode_ = fullscreen;
+    if (fullscreen && audioControls_->parentWidget() != this) {
+        audioControls_->setParent(this);
+        audioControls_->show();
+    } else if (!fullscreen && audioControls_->parentWidget() != footerWidget_) {
+        audioControls_->setParent(footerWidget_);
+        footerWidget_->layout()->addWidget(audioControls_);
+        audioControls_->show();
+    }
     headerWidget_->setVisible(!fullscreen);
     footerWidget_->setVisible(!fullscreen);
 
@@ -332,6 +396,7 @@ void StreamPanel::hideMembersBar() {
         showMembersButton_->raise();
         updateMembersBarGeometry();
     }
+    updateMembersBarGeometry();
 }
 
 void StreamPanel::showMembersBar() {
@@ -357,6 +422,13 @@ void StreamPanel::updateMembersBarGeometry() {
         if (showMembersButton_->isVisible()) {
             showMembersButton_->raise();
         }
+    }
+    if (fullscreenMode_ && audioControls_) {
+        const QSize size = audioControls_->sizeHint();
+        const int bottomInset = membersHidden_ ? 10 : kBarHeight + 10;
+        audioControls_->setGeometry(10, height() - bottomInset - size.height(),
+                                    size.width(), size.height());
+        audioControls_->raise();
     }
 }
 

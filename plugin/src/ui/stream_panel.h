@@ -10,6 +10,7 @@
 class QHBoxLayout;
 class QLabel;
 class QToolButton;
+class QSlider;
 
 namespace ts3stream::ui {
 
@@ -50,10 +51,12 @@ public:
     void setMembers(const std::vector<RoomMember>& members);
     void setFullscreenMode(bool fullscreen);
     void setDetachedMode(bool detached);
+    void setPlaybackAudio(int volumePercent, bool muted);
 
     void setOnClose(std::function<void()> callback);
     void setOnFullscreen(std::function<void()> callback);
     void setOnDetach(std::function<void()> callback);
+    void setOnPlaybackAudioChanged(std::function<void(int, bool)> callback);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -77,6 +80,12 @@ private:
 
     QWidget* headerWidget_ = nullptr;
     QWidget* footerWidget_ = nullptr;
+    QWidget* audioControls_ = nullptr;
+    QToolButton* muteButton_ = nullptr;
+    QSlider* volumeSlider_ = nullptr;
+    QLabel* volumeLabel_ = nullptr;
+    int volumePercent_ = 100;
+    bool muted_ = false;
     QWidget* membersBar_ = nullptr;
     QHBoxLayout* membersLayout_ = nullptr;
     QToolButton* hideMembersButton_ = nullptr;
@@ -90,6 +99,7 @@ private:
     std::function<void()> onClose_;
     std::function<void()> onFullscreen_;
     std::function<void()> onDetach_;
+    std::function<void(int, bool)> onPlaybackAudioChanged_;
 };
 
 } // namespace ts3stream::ui
