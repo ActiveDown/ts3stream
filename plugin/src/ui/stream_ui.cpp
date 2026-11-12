@@ -503,10 +503,10 @@ void StreamUi::tryAutoConfigure() {
     discovery->registerClient(identity, nickname, serverUid, channelId,
                               [this, discovery, url](bool ok, const RegisteredConfig& registered,
                                                      const QString& error) {
-        autoConfigInProgress_ = false;
         if (!initialized_) {
             return;
         }
+        autoConfigInProgress_ = false;
         if (!ok) {
             diag::log("StreamUi: auto-configuration failed: %s", error.toUtf8().constData());
             nextAutoConfigAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);

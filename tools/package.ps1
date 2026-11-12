@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$Version = '0.3.1',
+    [string]$Version = '',
     [switch]$SkipBuild
 )
 
@@ -8,6 +8,10 @@ $project = Split-Path -Parent $PSScriptRoot
 $plugin = Join-Path $project 'plugin'
 $build = Join-Path $plugin 'build'
 $dist = Join-Path $project 'dist'
+if (-not $Version) {
+    $Version = ((Get-Content (Join-Path $plugin 'package.ini') | Select-String '^Version\s*=').Line -replace '^Version\s*=\s*','').Trim()
+}
+if (-not $Version) { throw 'package version is not set' }
 $stage = Join-Path $dist 'staging'
 
 if (-not $SkipBuild) {

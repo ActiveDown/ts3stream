@@ -98,6 +98,7 @@ void ControlClient::fetchToken(const QString& room, const QString& identity, con
 
     QNetworkReply* reply = network_->get(makeRequest(config_, url));
     QObject::connect(reply, &QNetworkReply::finished, this, [reply, callback = std::move(callback)] {
+        reply->setParent(nullptr);
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             callback(false, {}, replyError(reply));
@@ -127,6 +128,7 @@ void ControlClient::fetchStreams(const QString& room, StreamsCallback callback) 
 
     QNetworkReply* reply = network_->get(makeRequest(config_, url));
     QObject::connect(reply, &QNetworkReply::finished, this, [reply, callback = std::move(callback)] {
+        reply->setParent(nullptr);
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             callback(false, {}, replyError(reply));
@@ -167,6 +169,7 @@ void ControlClient::registerClient(const QString& uid, const QString& nickname,
         makeRequest(config_, url), QJsonDocument(body).toJson(QJsonDocument::Compact));
     QObject::connect(reply, &QNetworkReply::finished, this,
                      [reply, callback = std::move(callback)] {
+        reply->setParent(nullptr);
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             callback(false, {}, replyError(reply));
@@ -215,6 +218,7 @@ void ControlClient::postJson(const QString& path, const QByteArray& body) {
     const QUrl url(config_.baseUrl + path);
     QNetworkReply* reply = network_->post(makeRequest(config_, url), body);
     QObject::connect(reply, &QNetworkReply::finished, this, [reply, path] {
+        reply->setParent(nullptr);
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             diag::log("ControlClient: %s failed: %s", path.toUtf8().constData(),
