@@ -32,16 +32,16 @@
 Скачайте установщик, посмотрите его и запустите:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
-less install-ts3stream.sh
-sudo bash install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o install-linux.sh
+less install-linux.sh
+sudo bash install-linux.sh
 ```
 
 Или одной строкой (скачать в `/tmp` и запустить — работает с `sudo` на всех
 обычных Linux-дистрибутивах):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o /tmp/install-linux.sh && sudo bash /tmp/install-linux.sh
 ```
 
 Установщик спросит домен и подтверждение, затем:
@@ -57,10 +57,10 @@ curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/in
 
 ```bash
 # Интернет с автоматическим TLS
-sudo bash install-ts3stream.sh --domain stream.example.com --yes
+sudo bash install-linux.sh --domain stream.example.com --yes
 
 # LAN / тест без TLS (IP разрешён)
-sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
 Полезные опции: `--version v0.2.1` — зафиксировать релиз control API, `--no-firewall`, `--help`.
@@ -69,14 +69,14 @@ sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
 
 ```bash
 # Заработает сразу, но control API и токены пойдут по HTTP, без HTTPS.
-sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+sudo bash install-linux.sh --domain 95.142.44.214 --no-caddy --yes
 ```
 
 Для TLS без покупки домена используйте бесплатное wildcard-имя, которое
 указывает на ваш IP, например `95-142-44-214.sslip.io` (точки заменяются на дефисы):
 
 ```bash
-sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+sudo bash install-linux.sh --domain 95-142-44-214.sslip.io --yes
 ```
 
 Порты 80 и 443 должны быть доступны для сертификата Let's Encrypt.
@@ -201,3 +201,5 @@ docs/     установка Linux/Windows, архитектура, звук
 ## Лицензия
 
 MIT для оригинального кода. Заголовки TeamSpeak 3 SDK принадлежат TeamSpeak Systems GmbH. LiveKit — Apache-2.0, Qt — LGPL-3.0. Подробности в [NOTICE](NOTICE).
+
+

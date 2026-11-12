@@ -1,4 +1,4 @@
-# Установка TS3Stream на Linux-сервер
+﻿# Установка TS3Stream на Linux-сервер
 
 Инструкция для Ubuntu 22.04/24.04. Ставим полный стек:
 
@@ -15,15 +15,15 @@
 уже установлен**, выполните:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
-less install-ts3stream.sh
-sudo bash install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o install-linux.sh
+less install-linux.sh
+sudo bash install-linux.sh
 ```
 
 Или одной строкой (скачать в `/tmp` и запустить — работает с `sudo`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o /tmp/install-linux.sh && sudo bash /tmp/install-linux.sh
 ```
 
 Установщик спросит публичное DNS-имя и подтверждение, затем поставит LiveKit,
@@ -34,20 +34,20 @@ control API и Caddy, создаст systemd-службы, сгенерируе�
 
 ```bash
 # Интернет с автоматическим TLS
-sudo bash install-ts3stream.sh --domain stream.example.com --yes
+sudo bash install-linux.sh --domain stream.example.com --yes
 
 # LAN / тест без TLS
-sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
 Есть только публичный IP, без домена:
 
 ```bash
 # HTTP/WS, без TLS
-sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+sudo bash install-linux.sh --domain 95.142.44.214 --no-caddy --yes
 
 # Бесплатный DNS + TLS: sslip.io резолвит 95-142-44-214.sslip.io в 95.142.44.214
-sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+sudo bash install-linux.sh --domain 95-142-44-214.sslip.io --yes
 ```
 
 `sslip.io` — бесплатный wildcard DNS; порты 80/443 должны быть доступны, чтобы
@@ -433,3 +433,5 @@ sudo systemctl start ts3stream-control
 - **Ошибка сертификата Caddy**: DNS должен указывать на сервер, порт 80 должен
   быть доступен.
 - **LiveKit не стартует**: проверьте YAML и совпадение секрета с `control.env`.
+
+

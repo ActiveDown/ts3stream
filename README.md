@@ -1,4 +1,4 @@
-# TS3Stream
+﻿# TS3Stream
 
 Discord-style screen and application streaming inside **stock TeamSpeak 3** on Windows, with LiveKit running next to the untouched TS3 server.
 
@@ -32,16 +32,16 @@ Requirements:
 Download the installer, inspect it, and run it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
-less install-ts3stream.sh
-sudo bash install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o install-linux.sh
+less install-linux.sh
+sudo bash install-linux.sh
 ```
 
 Or run it in one line (download to `/tmp`, then execute — this works with
 `sudo` on all common Linux distributions):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o /tmp/install-linux.sh && sudo bash /tmp/install-linux.sh
 ```
 
 The installer prompts for the domain and confirmation, then:
@@ -57,10 +57,10 @@ Non-interactive examples:
 
 ```bash
 # Internet-facing with automatic TLS
-sudo bash install-ts3stream.sh --domain stream.example.com --yes
+sudo bash install-linux.sh --domain stream.example.com --yes
 
 # LAN / test without TLS (IP is allowed here)
-sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
 Useful options: `--version v0.2.1` to pin the control API release, `--no-firewall`, `--help`.
@@ -69,14 +69,14 @@ If you only have a public IP and no domain:
 
 ```bash
 # Works immediately, but control API/token traffic is HTTP, not HTTPS.
-sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+sudo bash install-linux.sh --domain 95.142.44.214 --no-caddy --yes
 ```
 
 For TLS without buying a domain, use a free wildcard DNS name that resolves to
 your IP, for example `95-142-44-214.sslip.io` (dots become dashes):
 
 ```bash
-sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+sudo bash install-linux.sh --domain 95-142-44-214.sslip.io --yes
 ```
 
 Ports 80 and 443 must be reachable for the Let's Encrypt certificate.
@@ -201,3 +201,5 @@ docs/     Linux/Windows installation, architecture, audio
 ## License
 
 MIT for the original code. TeamSpeak 3 SDK headers remain property of TeamSpeak Systems GmbH. LiveKit is Apache-2.0; Qt is LGPL-3.0. See [NOTICE](NOTICE).
+
+

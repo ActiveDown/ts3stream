@@ -1,4 +1,4 @@
-# Installing TS3Stream on a Linux server
+﻿# Installing TS3Stream on a Linux server
 
 This guide installs a complete server stack on Ubuntu 22.04/24.04:
 
@@ -15,15 +15,15 @@ On a fresh Ubuntu 22.04/24.04 or Debian 12 x86_64 host with the **stock TS3
 server already installed**, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
-less install-ts3stream.sh
-sudo bash install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o install-linux.sh
+less install-linux.sh
+sudo bash install-linux.sh
 ```
 
 Or one line (download to `/tmp`, then execute — this works with `sudo`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o /tmp/install-ts3stream.sh && sudo bash /tmp/install-ts3stream.sh
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-linux.sh -o /tmp/install-linux.sh && sudo bash /tmp/install-linux.sh
 ```
 
 The installer asks for the public DNS name and confirmation, then installs
@@ -34,20 +34,20 @@ Non-interactive examples:
 
 ```bash
 # Internet-facing with automatic TLS
-sudo bash install-ts3stream.sh --domain stream.example.com --yes
+sudo bash install-linux.sh --domain stream.example.com --yes
 
 # LAN / test without TLS
-sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+sudo bash install-linux.sh --domain 192.168.1.50 --no-caddy --yes
 ```
 
 Only a public IP, no domain:
 
 ```bash
 # HTTP/WS, no TLS
-sudo bash install-ts3stream.sh --domain 95.142.44.214 --no-caddy --yes
+sudo bash install-linux.sh --domain 95.142.44.214 --no-caddy --yes
 
 # Free DNS + TLS: sslip.io resolves 95-142-44-214.sslip.io to 95.142.44.214
-sudo bash install-ts3stream.sh --domain 95-142-44-214.sslip.io --yes
+sudo bash install-linux.sh --domain 95-142-44-214.sslip.io --yes
 ```
 
 `sslip.io` is a free wildcard DNS service; ports 80/443 must be reachable for
@@ -434,3 +434,5 @@ Replace the plugin DLL on Windows with the new `.ts3_plugin` package.
   reachable.
 - **LiveKit does not start**: validate the YAML and make sure the API secret
   matches `control.env`.
+
+
