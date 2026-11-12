@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 #
 # TS3Stream interactive installer for Debian/Ubuntu.
 #
@@ -24,11 +24,16 @@ API_KEY="ts3stream"
 API_SECRET=""
 CLIENT_KEY=""
 TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD:-}"
+TS3_QUERY_PORT="${TS3_QUERY_PORT:-10011}"
+TS3_QUERY_PORT_SET=0
 TS3_SERVER_DIR="${TS3_SERVER_DIR:-}"
 RESET_TS3_QUERY=0
 INSTALL_CADDY=1
 CONFIGURE_FIREWALL=1
 ASSUME_YES=0
+SKIP_DNS_CHECK=0
+DNS_WARNING=""
+DDNS_UPDATE_URL="${TS3STREAM_DDNS_UPDATE_URL:-}"
 LIVEKIT_ARCHIVE=""
 
 usage() {
@@ -44,11 +49,14 @@ Options:
   --api-secret SECRET    LiveKit API secret (default: generated)
   --client-key KEY       Shared key for the TS3 plugin (default: generated)
   --ts3-query-password P  ServerQuery password; auto-detected from TS3 logs by default
+  --ts3-query-port PORT  ServerQuery port (default: 10011 or the value from ts3server.ini)
   --ts3-dir DIR          TeamSpeak 3 server directory (default: auto-detect)
   --reset-ts3-query      If the password is unknown, reset it automatically (server restart)
   --version TAG          Control API release tag, e.g. v0.3.1 (default: latest)
   --no-caddy             Skip Caddy/TLS; use http:// and ws:// (LAN/testing)
   --no-firewall          Do not add UFW rules
+  --skip-dns-check       Do not verify that the domain points to this server
+  --ddns-update-url URL  Call a FreeDNS/no-IP update URL before the DNS check
   --livekit-archive URL  Override the LiveKit Linux amd64 archive URL
   -y, --yes              Do not ask for confirmation
   -h, --help             Show this help
@@ -74,6 +82,51 @@ need_commands() {
     done
 }
 
+is_no() {
+    case "${1:-}" in
+        n|N|no|NO|No|nO|н|Н|нет|Нет|НЕТ|no.|No.|nope) return 0 ;;
+    esac
+    return 1
+}
+
+read_env_value() {
+    local key="$1" file="$2" line value
+    [[ -r "$file" ]] || return 0
+    line="$(grep -E "^[[:space:]]*${key}=" "$file" | tail -n 1 || true)"
+    [[ -n "$line" ]] || return 0
+    value="${line#*=}"
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+        value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+        value="${value:1:${#value}-2}"
+    fi
+    printf '%s' "$value"
+}
+
+load_existing_config() {
+    local file=/etc/ts3stream/control.env
+    [[ -r "$file" ]] || return 0
+    local key secret client pass addr public_url
+    key="$(read_env_value LIVEKIT_API_KEY "$file")"
+    secret="$(read_env_value LIVEKIT_API_SECRET "$file")"
+    client="$(read_env_value TS3STREAM_CLIENT_KEY "$file")"
+    pass="$(read_env_value TS3_QUERY_PASSWORD "$file")"
+    addr="$(read_env_value TS3_QUERY_ADDR "$file")"
+    public_url="$(read_env_value TS3STREAM_PUBLIC_URL "$file")"
+
+    if [[ -n "$key" && "$API_KEY" == "ts3stream" ]]; then API_KEY="$key"; fi
+    [[ -z "$API_SECRET" ]] && API_SECRET="$secret"
+    [[ -z "$CLIENT_KEY" ]] && CLIENT_KEY="$client"
+    [[ -z "$TS3_QUERY_PASSWORD" ]] && TS3_QUERY_PASSWORD="$pass"
+    if [[ -n "$addr" && "$TS3_QUERY_PORT_SET" -eq 0 ]]; then
+        TS3_QUERY_PORT="${addr##*:}"
+    fi
+    if [[ -z "$DOMAIN" && "$public_url" == https://* ]]; then
+        DOMAIN="${public_url#https://}"
+        DOMAIN="${DOMAIN%/}"
+    fi
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -82,12 +135,15 @@ parse_args() {
             --api-secret) API_SECRET="${2:-}"; shift 2 ;;
             --client-key) CLIENT_KEY="${2:-}"; shift 2 ;;
             --ts3-query-password) TS3_QUERY_PASSWORD="${2:-}"; shift 2 ;;
+            --ts3-query-port) TS3_QUERY_PORT="${2:-}"; TS3_QUERY_PORT_SET=1; shift 2 ;;
             --ts3-dir) TS3_SERVER_DIR="${2:-}"; shift 2 ;;
             --reset-ts3-query) RESET_TS3_QUERY=1; shift ;;
             --version) CONTROL_VERSION="${2:-}"; shift 2 ;;
             --livekit-archive) LIVEKIT_ARCHIVE="${2:-}"; shift 2 ;;
             --no-caddy) INSTALL_CADDY=0; shift ;;
             --no-firewall) CONFIGURE_FIREWALL=0; shift ;;
+            --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
+            --ddns-update-url) DDNS_UPDATE_URL="${2:-}"; shift 2 ;;
             -y|--yes) ASSUME_YES=1; shift ;;
             -h|--help) usage; exit 0 ;;
             *) die "unknown option: $1 (use --help)" ;;
@@ -111,7 +167,45 @@ check_os() {
     esac
 }
 
+check_domain_dns() {
+    DNS_WARNING=""
+    [[ "${INSTALL_CADDY}" -eq 1 && "${SKIP_DNS_CHECK}" -eq 0 ]] || return 0
+    command -v getent >/dev/null 2>&1 || return 0
+    local resolved public_ip fqdn fqdn_ips resolved_list
+    resolved="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+    if [[ -z "$resolved" ]]; then
+        DNS_WARNING="DNS: $DOMAIN does not resolve."
+        warn "$DOMAIN does not resolve; Caddy cannot obtain a TLS certificate."
+        return 1
+    fi
+    public_ip="$(curl -4 -fsS --max-time 10 https://ifconfig.me 2>/dev/null || curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+    [[ -n "$public_ip" ]] || return 0
+    resolved_list="$(tr '\n' ' ' <<< "$resolved")"
+    if ! grep -qx "$public_ip" <<< "$resolved"; then
+        DNS_WARNING="DNS: $DOMAIN -> ${resolved_list}, but this server is $public_ip."
+        warn "DNS mismatch: $DOMAIN resolves to ${resolved_list}, but this server's public IP is $public_ip."
+        fqdn="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+        if [[ -n "$fqdn" && "$fqdn" != "$DOMAIN" ]]; then
+            fqdn_ips="$(getent ahostsv4 "$fqdn" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+            if grep -qx "$public_ip" <<< "$fqdn_ips"; then
+                warn "This server's own name resolves correctly: $fqdn"
+                warn "You can rerun with: --domain $fqdn"
+            fi
+        fi
+        if command -v dig >/dev/null 2>&1; then
+            local apex="${DOMAIN#*.}"
+            if dig +short NS "$apex" 2>/dev/null | grep -q 'afraid.org'; then
+                warn "DNS provider: FreeDNS (afraid.org). Change the A record for $DOMAIN to $public_ip at https://freedns.afraid.org/."
+            fi
+        fi
+        warn "Caddy cannot obtain a certificate until the A record for $DOMAIN points to $public_ip."
+        return 1
+    fi
+    return 0
+}
+
 ask_settings() {
+    load_existing_config
     DOMAIN="${DOMAIN#http://}"
     DOMAIN="${DOMAIN#https://}"
     DOMAIN="${DOMAIN%/}"
@@ -129,6 +223,18 @@ ask_settings() {
         local freeDns="${DOMAIN//./-}.sslip.io"
         die "Caddy needs a DNS name, not an IP. Re-run with --no-caddy for http/ws, or use a free DNS name such as ${freeDns} or FreeDNS (freedns.afraid.org) and open ports 80/443."
     fi
+
+    if [[ -n "${DDNS_UPDATE_URL}" ]]; then
+        log "updating dynamic DNS"
+        if curl -fsS --max-time 15 "${DDNS_UPDATE_URL}" >/dev/null; then
+            log "dynamic DNS update request sent"
+            sleep 3
+        else
+            warn "dynamic DNS update request failed"
+        fi
+    fi
+
+    check_domain_dns || true
 
     if [[ -z "${API_SECRET}" ]]; then
         API_SECRET="$(openssl rand -hex 32)"
@@ -148,9 +254,9 @@ ask_settings() {
         echo "  control tag:  ${CONTROL_VERSION:-latest}"
         echo
         read -r -p "Continue? [Y/n] " answer
-        case "${answer}" in
-            n|N|no|NO) die "cancelled" ;;
-        esac
+        if is_no "${answer}"; then
+            die "cancelled"
+        fi
     fi
 }
 
@@ -185,10 +291,32 @@ find_ts3_service() {
         | awk '{print $1}' | grep -Ei '(^|[-_])(ts3server|teamspeak).*\.service$' | head -n 1 || true
 }
 
+ts3_query_port_from_dir() {
+    local dir="$1" ini port
+    for ini in "$dir/ts3server.ini" "$dir"/*.ini; do
+        [[ -f "$ini" ]] || continue
+        port="$(sed -n 's/^[[:space:]]*query_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ini" | head -n 1)"
+        if [[ -n "$port" ]]; then
+            printf '%s\n' "$port"
+            return 0
+        fi
+    done
+}
+
+query_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value// /\\s}"
+    value="${value//|/\\p}"
+    value="${value//\//\\/}"
+    printf '%s' "$value"
+}
+
 query_login_ok() {
-    local password="$1"
+    local password="$1" port="${2:-10011}" escaped
+    escaped="$(query_escape "$password")"
     timeout 5 bash -c '
-        exec 3<>/dev/tcp/127.0.0.1/10011 || exit 1
+        exec 3<>/dev/tcp/127.0.0.1/"$2" || exit 1
         IFS= read -r -t 2 _ <&3 || true
         printf "login serveradmin %s\n" "$1" >&3
         while IFS= read -r -t 2 line <&3; do
@@ -198,85 +326,213 @@ query_login_ok() {
             esac
         done
         exit 1
-    ' _ "$password" >/dev/null 2>&1
+    ' _ "$escaped" "$port" >/dev/null 2>&1
+}
+
+query_port_open() {
+    timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/"$1"' _ "$1" 2>/dev/null
+}
+
+accept_ts3_password() {
+    local password="$1" source="$2" port="${3:-$TS3_QUERY_PORT}"
+    if query_login_ok "$password" "$port"; then
+        TS3_QUERY_PASSWORD="$password"
+        log "detected a working TS3 ServerQuery password in $source"
+        return 0
+    fi
+    if ! query_port_open "$port"; then
+        TS3_QUERY_PASSWORD="$password"
+        warn "found a TS3 ServerQuery password in $source, but the query port is not open; keeping it"
+        return 0
+    fi
+    warn "found a TS3 ServerQuery password in $source, but it was rejected; continuing"
+    return 1
+}
+
+wait_query_port() {
+    local port="$1" i
+    for i in {1..30}; do
+        if timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/"$1"' _ "$port" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+print_ts3_diagnostics() {
+    local service="$1" dir="$2" port="$3"
+    warn "TS3 service: ${service}; directory: ${dir}; query port: ${port}"
+    systemctl status "$service" --no-pager -l 2>&1 | head -n 15 >&2 || true
+    warn "TS3 service settings:"
+    systemctl show -p User -p WorkingDirectory -p ExecStart --value "$service" >&2 || true
+    warn "Recent ${service} log:"
+    journalctl -u "$service" -n 20 --no-pager >&2 || true
 }
 
 reset_ts3_query_password() {
-    local service dir user newpass output
+    local service dir user newpass output binary arg port argv exec_path exec_dir candidate
     service="$(find_ts3_service)"
     if [[ -z "$service" ]]; then
-        warn "cannot reset ServerQuery password: ts3server systemd service not found"
+        warn "cannot reset ServerQuery password: no ts3server/teamspeak systemd service found"
+        warn "set TS3_QUERY_PASSWORD manually in /etc/ts3stream/control.env"
         return 1
     fi
     dir="$TS3_SERVER_DIR"
     if [[ -z "$dir" ]]; then
         dir="$(systemctl show -p WorkingDirectory --value "$service" 2>/dev/null || true)"
+        [[ "$dir" == "-" ]] && dir=""
     fi
-    if [[ -z "$dir" || ! -x "$dir/ts3server" ]]; then
+
+    binary=""
+    if [[ -n "$dir" && -d "$dir" ]]; then
+        for candidate in "$dir/ts3server" "$dir/ts3server_linux_amd64" "$dir/ts3server_linux_x86_64" "$dir/ts3server_linux_arm64"; do
+            if [[ -f "$candidate" && -x "$candidate" ]]; then
+                binary="$candidate"
+                break
+            fi
+        done
+    fi
+    if [[ -z "$binary" ]]; then
+        # WorkingDirectory may be unset; fall back to the ExecStart path.
+        exec_path="$(systemctl show -p ExecStart --value "$service" 2>/dev/null | sed -n 's/.*path=\([^ ]*\).*/\1/p' | head -n 1 || true)"
+        if [[ -n "$exec_path" ]]; then
+            exec_dir="$(dirname "$exec_path")"
+            for candidate in "$exec_dir/ts3server" "$exec_path"; do
+                if [[ -f "$candidate" && -x "$candidate" && "$(basename "$candidate")" != *.sh ]]; then
+                    binary="$candidate"
+                    dir="$exec_dir"
+                    break
+                fi
+            done
+        fi
+    fi
+    if [[ -z "$binary" ]]; then
         warn "cannot reset ServerQuery password: ts3server binary not found (use --ts3-dir)"
+        warn "working directory: ${dir:-unknown}"
         return 1
     fi
+
+    # TS3 keeps its database relative to the working directory. Start the
+    # temporary server there and reuse the service's ini/database arguments,
+    # otherwise the reset writes to a different, temporary database.
+    local -a extra=()
+    argv="$(systemctl show -p ExecStart --value "$service" 2>/dev/null | sed -n 's/.*argv\[\]=\([^;]*\).*/\1/p' | head -n 1 || true)"
+    if [[ -n "$argv" ]] && printf '%s' "$argv" | grep -qE '(^|/)(docker|podman)( |$)'; then
+        warn "TS3 appears to run in a container; automatic ServerQuery reset is not supported."
+        warn "Set TS3_QUERY_PASSWORD manually in /etc/ts3stream/control.env."
+        return 1
+    fi
+    for arg in $argv; do
+        case "$arg" in
+            inifile=*|dbsqlitedb=*|dbplugin=*|dbpluginparameter=*|dbsqlpath=*|dbsqlcreatepath=*)
+                extra+=("$arg")
+                ;;
+        esac
+    done
+
+    port="$(ts3_query_port_from_dir "$dir" || true)"
+    [[ -n "$port" ]] || port="$TS3_QUERY_PORT"
     user="$(systemctl show -p User --value "$service" 2>/dev/null || true)"
-    [[ -n "$user" ]] || user=root
+    [[ -n "$user" && "$user" != "-" ]] || user=root
     newpass="$(openssl rand -hex 24)"
     output="$(mktemp)"
 
     log "stopping $service to reset the ServerQuery password"
     systemctl stop "$service" >/dev/null 2>&1 || true
+    local i
+    for i in {1..10}; do
+        systemctl is-active --quiet "$service" || break
+        sleep 1
+    done
+
+    local -a cmd=("$binary")
+    if ((${#extra[@]})); then cmd+=("${extra[@]}"); fi
+    cmd+=("serveradmin_password=$newpass" "license_accepted=1")
+
     if [[ "$user" == "root" ]]; then
-        timeout 20 "$dir/ts3server" serveradmin_password="$newpass" license_accepted=1 >"$output" 2>&1 || true
+        ( cd "$dir" && timeout 25 "${cmd[@]}" ) >"$output" 2>&1 || true
     elif command -v runuser >/dev/null 2>&1; then
-        timeout 20 runuser -u "$user" -- "$dir/ts3server" serveradmin_password="$newpass" license_accepted=1 >"$output" 2>&1 || true
+        ( cd "$dir" && timeout 25 runuser -u "$user" -- "${cmd[@]}" ) >"$output" 2>&1 || true
     else
         warn "runuser not found; cannot reset as user $user"
         rm -f "$output"
         systemctl start "$service" >/dev/null 2>&1 || true
         return 1
     fi
-    systemctl start "$service" >/dev/null 2>&1 || true
-    local i verified=0
-    for i in 1 2 3 4 5; do
-        sleep 1
-        if query_login_ok "$newpass"; then
-            verified=1
-            break
-        fi
-    done
 
-    if [[ "$verified" -eq 0 ]]; then
-        warn "ServerQuery password reset did not verify. Check the TS3 server log and set TS3_QUERY_PASSWORD manually."
+    if ! grep -qiE 'updated server.?query admin password|serveradmin password' "$output"; then
+        warn "the temporary TS3 server did not confirm the password update"
+        tail -n 15 "$output" >&2 || true
+    fi
+
+    systemctl start "$service" >/dev/null 2>&1 || true
+    if ! wait_query_port "$port"; then
+        warn "TS3 ServerQuery port ${port} is not listening after the restart"
+        print_ts3_diagnostics "$service" "$dir" "$port"
         rm -f "$output"
         return 1
     fi
+    if ! query_login_ok "$newpass" "$port"; then
+        warn "TS3 ServerQuery rejected the generated password"
+        print_ts3_diagnostics "$service" "$dir" "$port"
+        rm -f "$output"
+        return 1
+    fi
+
     rm -f "$output"
     TS3_QUERY_PASSWORD="$newpass"
+    TS3_QUERY_PORT="$port"
     TS3_SERVER_DIR="$dir"
     log "ServerQuery password reset and verified; the new password is stored in control.env"
     return 0
 }
 
+adopt_ts3_dir() {
+    local dir="$1" port
+    TS3_SERVER_DIR="$dir"
+    if [[ "$TS3_QUERY_PORT_SET" -eq 0 ]]; then
+        port="$(ts3_query_port_from_dir "$dir" || true)"
+        [[ -n "$port" ]] && TS3_QUERY_PORT="$port"
+    fi
+}
+
 detect_ts3_query() {
     if [[ -n "${TS3_QUERY_PASSWORD}" ]]; then
-        log "using provided TS3 ServerQuery password"
-        return 0
-    fi
-    local dirs=("${TS3_SERVER_DIR}" /opt/ts3server /root/ts3server /root/teamspeak3-server /home/ts3/ts3server /opt/teamspeak3-server /usr/local/ts3server)
-    local dir line found
-    for dir in "${dirs[@]}"; do
-        [[ -n "$dir" && -d "$dir" ]] || continue
-        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out 2>/dev/null | head -n 1 || true)"
-        if [[ -n "$line" ]]; then
-            TS3_SERVER_DIR="$dir"
-            TS3_QUERY_PASSWORD="${line#*password= \"}"
-            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
-            log "detected TS3 ServerQuery password in $dir"
+        if query_login_ok "${TS3_QUERY_PASSWORD}" "$TS3_QUERY_PORT"; then
+            log "using provided TS3 ServerQuery password"
             return 0
         fi
+        if ! query_port_open "$TS3_QUERY_PORT"; then
+            log "using provided TS3 ServerQuery password (query port is not open yet)"
+            return 0
+        fi
+        warn "the provided TS3 ServerQuery password was rejected; searching for a working one"
+        TS3_QUERY_PASSWORD=""
+    fi
+    local service
+    service="$(find_ts3_service)"
+    local dirs=("${TS3_SERVER_DIR}" /opt/ts3server /opt/teamspeak /opt/teamspeak3-server /root/ts3server /root/teamspeak3-server /root/teamspeak /home/ts3/ts3server /home/teamspeak/teamspeak3-server /usr/local/ts3server /srv/ts3server)
+    local dir line found candidate
+    for dir in "${dirs[@]}"; do
+        [[ -n "$dir" && -d "$dir" ]] || continue
+        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out "$dir"/*.err 2>/dev/null | tail -n 1 || true)"
+        if [[ -n "$line" ]]; then
+            adopt_ts3_dir "$dir"
+            candidate="${line#*password= \"}"
+            candidate="${candidate%\"}"
+            if accept_ts3_password "$candidate" "$dir"; then
+                return 0
+            fi
+        fi
     done
-    # Fall back to systemd's WorkingDirectory or a shallow filesystem search.
-    found="$(systemctl show -p WorkingDirectory --value ts3server 2>/dev/null || true)"
-    if [[ -n "$found" && -d "$found" ]]; then
-        dirs+=("$found")
+    # Fall back to the systemd service's WorkingDirectory or a shallow search.
+    if [[ -n "$service" ]]; then
+        found="$(systemctl show -p WorkingDirectory --value "$service" 2>/dev/null || true)"
+        [[ "$found" == "-" ]] && found=""
+        if [[ -n "$found" && -d "$found" ]]; then
+            dirs+=("$found")
+        fi
     fi
     found="$(find /opt /srv /home /root /usr/local -maxdepth 4 -type f -name ts3server 2>/dev/null | head -n 1 || true)"
     if [[ -n "$found" ]]; then
@@ -284,22 +540,24 @@ detect_ts3_query() {
     fi
     for dir in "${dirs[@]}"; do
         [[ -n "$dir" && -d "$dir" ]] || continue
-        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out "$dir"/*.err 2>/dev/null | head -n 1 || true)"
+        line="$(grep -RhoE 'password= "[^"]+"' "$dir"/logs "$dir"/*.out "$dir"/*.err 2>/dev/null | tail -n 1 || true)"
         if [[ -n "$line" ]]; then
-            TS3_SERVER_DIR="$dir"
-            TS3_QUERY_PASSWORD="${line#*password= \"}"
-            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
-            log "detected TS3 ServerQuery password in $dir"
-            return 0
+            adopt_ts3_dir "$dir"
+            candidate="${line#*password= \"}"
+            candidate="${candidate%\"}"
+            if accept_ts3_password "$candidate" "$dir"; then
+                return 0
+            fi
         fi
     done
     if command -v journalctl >/dev/null 2>&1; then
-        line="$(journalctl -u ts3server -n 1000 --no-pager 2>/dev/null | grep -oE 'password= "[^"]+"' | head -n 1 || true)"
+        line="$(journalctl -u "${service:-ts3server}" -n 2000 --no-pager 2>/dev/null | grep -oE 'password= "[^"]+"' | tail -n 1 || true)"
         if [[ -n "$line" ]]; then
-            TS3_QUERY_PASSWORD="${line#*password= \"}"
-            TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD%\"}"
-            log "detected TS3 ServerQuery password in journalctl"
-            return 0
+            candidate="${line#*password= \"}"
+            candidate="${candidate%\"}"
+            if accept_ts3_password "$candidate" "${service:-ts3server} journal"; then
+                return 0
+            fi
         fi
     fi
     if [[ "${RESET_TS3_QUERY}" -eq 1 ]]; then
@@ -313,17 +571,18 @@ detect_ts3_query() {
         read -r -s -p "Enter the current ServerQuery password (empty = reset it): " queryAnswer
         echo
         if [[ -n "${queryAnswer}" ]]; then
-            if query_login_ok "${queryAnswer}"; then
+            if query_login_ok "${queryAnswer}" "$TS3_QUERY_PORT"; then
                 TS3_QUERY_PASSWORD="${queryAnswer}"
                 return 0
             fi
             warn "ServerQuery rejected that password"
         fi
         read -r -p "Reset the ServerQuery password automatically? The TS3 server will be restarted. [Y/n] " resetAnswer
-        case "${resetAnswer}" in
-            n|N|no|NO) warn "ServerQuery auto-provisioning disabled"; return 1 ;;
-            *) reset_ts3_query_password && return 0 || return 1 ;;
-        esac
+        if is_no "${resetAnswer}"; then
+            warn "ServerQuery auto-provisioning disabled"
+            return 1
+        fi
+        reset_ts3_query_password && return 0 || return 1
     fi
     warn "TS3 ServerQuery password was not found. Auto-provisioning and UID checks will be disabled; pass --ts3-query-password or --reset-ts3-query to enable them."
     return 1
@@ -428,7 +687,7 @@ EOF
     if [[ -n "${TS3_QUERY_PASSWORD}" ]]; then
         cat >> /etc/ts3stream/control.env <<EOF
 TS3STREAM_WELCOME_AUTO=1
-TS3_QUERY_ADDR=127.0.0.1:10011
+TS3_QUERY_ADDR=127.0.0.1:${TS3_QUERY_PORT}
 TS3_QUERY_USER=serveradmin
 TS3_QUERY_PASSWORD="${TS3_QUERY_PASSWORD}"
 TS3_QUERY_SID=1
@@ -496,6 +755,10 @@ configure_caddy() {
     fi
 
     cat > "${caddyfile}" <<EOF
+{
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
 ${DOMAIN} {
     encode zstd gzip
 
@@ -553,8 +816,10 @@ start_services() {
 }
 
 check_ts3() {
-    if systemctl is-active --quiet ts3server.service 2>/dev/null; then
-        log "ts3server.service is running"
+    local service
+    service="$(find_ts3_service)"
+    if [[ -n "$service" ]] && systemctl is-active --quiet "$service" 2>/dev/null; then
+        log "$service is running"
         return
     fi
     if command -v ss >/dev/null 2>&1 && ss -lun 2>/dev/null | grep -q ':9987'; then
@@ -580,18 +845,25 @@ wait_health() {
         fi
         sleep 2
     done
-    warn "health check did not pass yet; inspect: journalctl -u ts3stream-control -n 80"
+    if [[ "${INSTALL_CADDY}" -eq 1 ]] && curl -fsS --max-time 5 http://127.0.0.1:8081/api/health >/dev/null 2>&1; then
+        warn "control API is healthy locally; ${url} failed (check DNS and the TLS certificate)."
+    fi
+    warn "health check did not pass yet; recent control log:"
+    journalctl -u ts3stream-control -n 30 --no-pager >&2 || true
     return 1
 }
 
 print_result() {
-    local control_url livekit_url
+    local control_url livekit_url dns_note=""
     if [[ "${INSTALL_CADDY}" -eq 1 ]]; then
         control_url="https://${DOMAIN}"
         livekit_url="wss://${DOMAIN}"
     else
         control_url="http://${DOMAIN}:8081"
         livekit_url="ws://${DOMAIN}:7880"
+    fi
+    if [[ -n "${DNS_WARNING}" ]]; then
+        dns_note=$'\n'"DNS/TLS warning:"$'\n'"  ${DNS_WARNING}"$'\n'"  Fix the A record for ${DOMAIN}, then rerun the installer to obtain a certificate."$'\n'
     fi
 
     cat <<EOF
@@ -623,7 +895,7 @@ Auto-provisioning (Welcome + UID check):
 Ports that must be reachable by clients:
   7881/tcp, 7882/udp
   $([[ ${INSTALL_CADDY} -eq 1 ]] && echo "443/tcp (Caddy / WSS / HTTPS)" || echo "8081/tcp, 7880/tcp (no TLS mode)")
-
+${dns_note}
 TS3 server is separate and was not modified. Open its ports:
   9987/udp, 10011/tcp (optional), 30033/tcp (optional)
 ==============================================================================

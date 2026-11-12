@@ -35,6 +35,11 @@ for it and offers an automatic reset (the TS3 server is restarted). For
 non-interactive installs use `--ts3-query-password '...'` or
 `--reset-ts3-query`.
 
+Before configuring Caddy, the installer checks that the domain resolves to this
+server's public IP and warns if it does not. If you use FreeDNS/no-IP, update
+the A record first, or pass its dynamic-update URL with
+`--ddns-update-url '...'`.
+
 Non-interactive examples:
 
 ```bash
