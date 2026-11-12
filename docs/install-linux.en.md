@@ -9,6 +9,36 @@ This guide installs a complete server stack on Ubuntu 22.04/24.04:
 
 The Windows client plugin is installed separately; see the end of this guide.
 
+## Quick install (recommended)
+
+On a fresh Ubuntu 22.04/24.04 or Debian 12 x86_64 host with the **stock TS3
+server already installed**, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
+less install-ts3stream.sh
+sudo bash install-ts3stream.sh
+```
+
+The installer asks for the public DNS name and confirmation, then installs
+LiveKit, the control API and Caddy, creates systemd services, generates secrets,
+adds UFW rules and prints the exact `service.json` for Windows clients.
+
+Non-interactive examples:
+
+```bash
+# Internet-facing with automatic TLS
+sudo bash install-ts3stream.sh --domain stream.example.com --yes
+
+# LAN / test without TLS
+sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+```
+
+If you prefer full control or use another distribution, follow the manual steps
+below.
+
+## Manual installation
+
 ## 1. Prepare the host
 
 You need:

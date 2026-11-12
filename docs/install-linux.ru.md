@@ -9,6 +9,36 @@
 
 Плагин Windows-клиента ставится отдельно; см. конец инструкции.
 
+## Быстрая установка (рекомендуется)
+
+На чистом Ubuntu 22.04/24.04 или Debian 12 x86_64, где **стоковый TS3-сервер
+уже установлен**, выполните:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ActiveDown/ts3stream/main/deploy/install-ts3stream.sh -o install-ts3stream.sh
+less install-ts3stream.sh
+sudo bash install-ts3stream.sh
+```
+
+Установщик спросит публичное DNS-имя и подтверждение, затем поставит LiveKit,
+control API и Caddy, создаст systemd-службы, сгенерирует секреты, добавит
+правила UFW и выведет готовый `service.json` для Windows-клиентов.
+
+Неинтерактивные примеры:
+
+```bash
+# Интернет с автоматическим TLS
+sudo bash install-ts3stream.sh --domain stream.example.com --yes
+
+# LAN / тест без TLS
+sudo bash install-ts3stream.sh --domain 192.168.1.50 --no-caddy --yes
+```
+
+Если нужен полный контроль или у вас другой дистрибутив — используйте ручные
+шаги ниже.
+
+## Ручная установка
+
 ## 1. Подготовка сервера
 
 Нужно:

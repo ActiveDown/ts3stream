@@ -1,6 +1,7 @@
 # Развёртывание на Linux
 
-> Пошаговая установка с нуля: [`install-linux.ru.md`](install-linux.ru.md)
+> Быстрая установка одной командой: `deploy/install-ts3stream.sh`.
+> Подробная инструкция: [`install-linux.ru.md`](install-linux.ru.md)
 > (English: [`install-linux.en.md`](install-linux.en.md)).
 > Установка на Windows-сервер: [`install-windows.ru.md`](install-windows.ru.md).
 
