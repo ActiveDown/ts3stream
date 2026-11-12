@@ -1,5 +1,5 @@
-param(
-    [string]$Version = '0.3.0',
+﻿param(
+    [string]$Version = '0.3.1',
     [switch]$SkipBuild
 )
 
@@ -68,3 +68,4 @@ $hash = (Get-FileHash $package -Algorithm SHA256).Hash
 Write-Host "package: $package"
 Write-Host "sha256:  $hash"
 Write-Host "size:    $([math]::Round((Get-Item $package).Length / 1MB, 2)) MB"
+

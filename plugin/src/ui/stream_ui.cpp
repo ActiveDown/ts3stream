@@ -435,7 +435,7 @@ void StreamUi::tryAutoConfigure() {
         return;
     }
     const ControlConfig& current = control_->config();
-    if (current.fromFile && !current.clientKey.isEmpty()) {
+    if (current.fromFile && current.autoConfigured) {
         autoConfigDone_ = true;
         return;
     }
@@ -468,6 +468,11 @@ void StreamUi::tryAutoConfigure() {
     const int start = welcome.indexOf(startTag);
     const int end = start >= 0 ? welcome.indexOf(endTag, start + startTag.size()) : -1;
     if (start < 0 || end < 0) {
+        if (current.fromFile && !current.clientKey.isEmpty()) {
+            // Keep the existing manual configuration; there is no welcome marker.
+            autoConfigDone_ = true;
+            return;
+        }
         nextAutoConfigAttempt_ = now + std::chrono::seconds(1);
         return;
     }
@@ -511,6 +516,7 @@ void StreamUi::tryAutoConfigure() {
         config.baseUrl = registered.controlUrl.isEmpty() ? url : registered.controlUrl;
         config.clientKey = registered.clientKey;
         config.fromFile = true;
+        config.autoConfigured = true;
         if (saveControlConfig(config)) {
             control_ = std::make_unique<ControlClient>(config, this);
             autoConfigDone_ = true;
@@ -1008,7 +1014,8 @@ void StreamUi::updateStreamButtonState() {
         diag::log("StreamUi: connection state changed connected=%d", connected ? 1 : 0);
         if (connected) {
             autoConfigAttempts_ = 0;
-            autoConfigDone_ = control_ && control_->config().fromFile;
+            autoConfigDone_ = control_ && control_->config().fromFile &&
+                              control_->config().autoConfigured;
             autoConfigInProgress_ = false;
             nextAutoConfigAttempt_ = std::chrono::steady_clock::now();
             if (ts3_.requestServerVariables && activeHandler != 0) {

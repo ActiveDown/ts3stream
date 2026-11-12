@@ -14,6 +14,7 @@ struct ControlConfig {
     QString baseUrl = QStringLiteral("http://127.0.0.1:8081");
     QString clientKey;
     bool fromFile = false;
+    bool autoConfigured = false;
 };
 
 struct RegisteredConfig {

@@ -57,6 +57,7 @@ ControlConfig loadControlConfig() {
         config.baseUrl = url;
     }
     config.clientKey = object.value(QStringLiteral("clientKey")).toString();
+    config.autoConfigured = object.value(QStringLiteral("autoConfigured")).toBool(false);
     return config;
 }
 
@@ -64,6 +65,9 @@ bool saveControlConfig(const ControlConfig& config) {
     QJsonObject object;
     object.insert(QStringLiteral("controlUrl"), config.baseUrl);
     object.insert(QStringLiteral("clientKey"), config.clientKey);
+    if (config.autoConfigured) {
+        object.insert(QStringLiteral("autoConfigured"), true);
+    }
     QFile file(configFilePath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         diag::log("ControlClient: cannot write service.json");

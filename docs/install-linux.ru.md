@@ -218,7 +218,7 @@ sudo systemctl enable --now livekit
 
 ```bash
 sudo curl -L -o /opt/ts3stream/bin/ts3stream-control \
-  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.0/ts3stream-control-linux-amd64
+  https://github.com/ActiveDown/ts3stream/releases/download/v0.3.1/ts3stream-control-linux-amd64
 sudo chmod +x /opt/ts3stream/bin/ts3stream-control
 ```
 
@@ -343,7 +343,7 @@ sudo ufw enable
 
 ## 7. Установка и настройка Windows-клиента
 
-1. Установите `ts3stream-0.3.0.ts3_plugin` через TeamSpeak Package Installer.
+1. Установите `ts3stream-0.3.1.ts3_plugin` через TeamSpeak Package Installer.
 2. Запустите TS3 и подключитесь к серверу.
 
 Обычно ничего вводить не нужно. Плагин читает маркер
@@ -451,6 +451,7 @@ sudo systemctl start ts3stream-control
 - **Ошибка сертификата Caddy**: DNS должен указывать на сервер, порт 80 должен
   быть доступен.
 - **LiveKit не стартует**: проверьте YAML и совпадение секрета с `control.env`.
+
 
 
 
